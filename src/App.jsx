@@ -107,7 +107,7 @@ const FALLBACK_COORDS = "1.2868,103.8545"; // 鱼尾狮公园，中心城区标�
 
 // 把这里换成你自己部署的 Google Apps Script Web App 网址（见 GoogleSheetBackend.gs 部署说明）
 // 留空（""）则跳过同步，只保存在本地演示存储里，不影响 App 其余功能
-const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyMKz0SyP74neQTy3bTo38IvaKNH7EadCubjsoEep1O6LqfQ5henawxScZTY8Sc4YQDuw/exec";
+const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwuj4JB31cT7uPgQ58RSMClqVHeooAvkcdz_85wfXf-5BGmKjz0UkRiXc0YYH5xhk2NXQ/exec";
 
 async function syncRegistrationToSheet(event, info, qty) {
   if (!GOOGLE_SHEET_WEBHOOK_URL) return { ok: true, blocked: false, message: "" }; // 未配置，跳过同步
