@@ -83,7 +83,7 @@ const DEFAULT_INTRO =
 
 // 把这里换成你自己部署的 Google Apps Script Web App 网址（见 GoogleSheetBackend.gs 部署说明）
 // 留空（""）则跳过同步，退回到"仅本次浏览器会话内存"的演示模式
-const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyMKz0SyP74neQTy3bTo38IvaKNH7EadCubjsoEep1O6LqfQ5henawxScZTY8Sc4YQDuw/exec";
+const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwK-R00QdfzCfDyVgmJ21lanC6UCwBHo97twmrp7s6y3Obx30MEITgQEcylqFwvcuon/exec";
 
 // 共享数据（活动列表 / 公司介绍 / Logo / 相册）：所有人、所有设备看到的都是同一份，
 // 存在 Google Sheet 的 AppData 工作表里，通过 Apps Script 读写
