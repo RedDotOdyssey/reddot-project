@@ -79,20 +79,69 @@ const initialEvents = [
 const DEFAULT_INTRO =
   "红点时光探索之旅成立于新加坡,专注本地深度微旅行与主题活动策划,用一个个\"红点\"标记城市里值得停留的时光。";
 
-/* ---------- 持久化存储 ---------- */
-async function loadKey(key, shared, fallback) {
+/* ---------- 持久化存储：共享数据走 Google Apps Script，个人数据走浏览器本地存储 ---------- */
+
+// 把这里换成你自己部署的 Google Apps Script Web App 网址（见 GoogleSheetBackend.gs 部署说明）
+// 留空（""）则跳过同步，退回到"仅本次浏览器会话内存"的演示模式
+const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyMKz0SyP74neQTy3bTo38IvaKNH7EadCubjsoEep1O6LqfQ5henawxScZTY8Sc4YQDuw/exec";
+
+// 共享数据（活动列表 / 公司介绍 / Logo / 相册）：所有人、所有设备看到的都是同一份，
+// 存在 Google Sheet 的 AppData 工作表里，通过 Apps Script 读写
+async function loadShared() {
+  if (!GOOGLE_SHEET_WEBHOOK_URL) return null;
   try {
-    const res = await window.storage.get(key, shared);
-    return res ? JSON.parse(res.value) : fallback;
+    const res = await fetch(`${GOOGLE_SHEET_WEBHOOK_URL}?action=getAppData`);
+    const json = await res.json();
+    return json.data || null;
+  } catch {
+    return null;
+  }
+}
+async function saveShared(payload) {
+  if (!GOOGLE_SHEET_WEBHOOK_URL) return;
+  try {
+    await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "saveAppData", payload }),
+    });
+  } catch {}
+}
+
+// 个人数据（我的报名记录/消息通知/语言偏好）：只需要留在这台设备上，
+// 用浏览器真正的 localStorage（这是标准网页 API，在任何正式部署的网站上都能用）
+function loadPersonal(key, fallback) {
+  try {
+    const raw = localStorage.getItem("rdtt_" + key);
+    return raw ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 }
-async function saveKey(key, shared, value) {
+function savePersonal(key, value) {
   try {
-    await window.storage.set(key, JSON.stringify(value), shared);
+    localStorage.setItem("rdtt_" + key, JSON.stringify(value));
   } catch {}
 }
+
+// 图片上传：转存到 Google Drive，返回一个图片网址（图片本身不会存进 Sheet 单元格，见部署说明）
+async function uploadImageToDrive(dataUrl, filename) {
+  if (!GOOGLE_SHEET_WEBHOOK_URL) return null;
+  try {
+    const mimeMatch = dataUrl.match(/^data:([^;]+);/);
+    const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+    const res = await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "uploadImage", base64: dataUrl, mimeType, filename: filename || "image.jpg" }),
+    });
+    const data = await res.json();
+    return data.success ? data.url : null;
+  } catch {
+    return null;
+  }
+}
+
 
 /* ---------- 工具函数：地图导航 & 分享 ---------- */
 function openMapNavigation(event) {
@@ -104,10 +153,6 @@ function openMapSearch(addressText) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 const FALLBACK_COORDS = "1.2868,103.8545"; // 鱼尾狮公园，中心城区标志性地标，作为定位失败时的保底坐标
-
-// 把这里换成你自己部署的 Google Apps Script Web App 网址（见 GoogleSheetBackend.gs 部署说明）
-// 留空（""）则跳过同步，只保存在本地演示存储里，不影响 App 其余功能
-const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwK-R00QdfzCfDyVgmJ21lanC6UCwBHo97twmrp7s6y3Obx30MEITgQEcylqFwvcuon/exec";
 
 async function syncRegistrationToSheet(event, info, qty) {
   if (!GOOGLE_SHEET_WEBHOOK_URL) return { ok: true, blocked: false, message: "" }; // 未配置，跳过同步
@@ -941,6 +986,7 @@ function EventFormScreen({ onBack, onSubmit, initial, mode = "create", templateT
   });
   const [error, setError] = useState("");
   const [locating, setLocating] = useState(false);
+  const [imgUploading, setImgUploading] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
   const missing = () => {
@@ -988,8 +1034,20 @@ function EventFormScreen({ onBack, onSubmit, initial, mode = "create", templateT
           </div>
           <label htmlFor="event-image-input" className="flex items-center gap-2 bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12px] text-[#6B6456] cursor-pointer">
             <ImagePlus size={15} />
-            {f.image ? t("已选择活动图片，点击可更换", "Photo selected — tap to change") : t("上传活动图片（可选）", "Upload event photo (optional)")}
-            <input id="event-image-input" type="file" accept="image/*" className="hidden" onChange={(e) => readImageFile(e.target.files?.[0], (url) => setF((prev) => ({ ...prev, image: url })))} />
+            {imgUploading ? t("正在上传图片…", "Uploading photo…") : f.image ? t("已选择活动图片，点击可更换", "Photo selected — tap to change") : t("上传活动图片（可选）", "Upload event photo (optional)")}
+            <input
+              id="event-image-input" type="file" accept="image/*" className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                readImageFile(file, async (localUrl) => {
+                  setF((prev) => ({ ...prev, image: localUrl }));
+                  setImgUploading(true);
+                  const remoteUrl = await uploadImageToDrive(localUrl, file?.name);
+                  setImgUploading(false);
+                  if (remoteUrl) setF((prev) => ({ ...prev, image: remoteUrl }));
+                });
+              }}
+            />
           </label>
           {f.image && (
             <div className="w-full bg-[#F1EAD9] rounded-lg overflow-hidden flex items-center justify-center" style={{ maxHeight: "260px" }}>
@@ -1033,8 +1091,8 @@ function EventFormScreen({ onBack, onSubmit, initial, mode = "create", templateT
         </div>
       </div>
       <div className="shrink-0 px-5 py-3 bg-[#FFFDF8] border-t border-[#EFE7D6]">
-        <button onClick={handleSubmit} disabled={locating} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium disabled:opacity-60" style={{ background: "#E8432D" }}>
-          {locating ? t("正在定位地点…", "Locating…") : mode === "edit" ? t("保存修改", "Save Changes") : t("发布活动", "Publish Event")}
+        <button onClick={handleSubmit} disabled={locating || imgUploading} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium disabled:opacity-60" style={{ background: "#E8432D" }}>
+          {imgUploading ? t("图片上传中，请稍候…", "Uploading photo, please wait…") : locating ? t("正在定位地点…", "Locating…") : mode === "edit" ? t("保存修改", "Save Changes") : t("发布活动", "Publish Event")}
         </button>
       </div>
     </div>
@@ -1046,11 +1104,32 @@ function EditIntroScreen({ intro, logo, photos, onBack, onSave, t, lang, setLang
   const [text, setText] = useState(intro);
   const [logoPreview, setLogoPreview] = useState(logo);
   const [photoList, setPhotoList] = useState(photos || []);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [photoUploading, setPhotoUploading] = useState(false);
+
+  const handleLogoChange = (file) => {
+    readImageFile(file, async (localUrl) => {
+      setLogoPreview(localUrl);
+      setLogoUploading(true);
+      const remoteUrl = await uploadImageToDrive(localUrl, file?.name);
+      setLogoUploading(false);
+      if (remoteUrl) setLogoPreview(remoteUrl);
+    });
+  };
 
   const addPhoto = (file) => {
-    readImageFile(file, (url) => setPhotoList((p) => [...p, url]));
+    readImageFile(file, async (localUrl) => {
+      setPhotoList((p) => [...p, localUrl]);
+      setPhotoUploading(true);
+      const remoteUrl = await uploadImageToDrive(localUrl, file?.name);
+      setPhotoUploading(false);
+      if (remoteUrl) {
+        setPhotoList((p) => p.map((item) => (item === localUrl ? remoteUrl : item)));
+      }
+    });
   };
   const removePhoto = (idx) => setPhotoList((p) => p.filter((_, i) => i !== idx));
+  const busy = logoUploading || photoUploading;
 
   return (
     <div className="h-full flex flex-col" style={{ background: "#FFFDF8" }}>
@@ -1060,8 +1139,8 @@ function EditIntroScreen({ intro, logo, photos, onBack, onSave, t, lang, setLang
         <div className="flex items-center gap-3 mb-1">
           <img src={logoPreview} alt="Logo preview" className="w-16 h-16 rounded-full object-cover border border-[#EFE7D6]" />
           <label htmlFor="logo-input" className="flex items-center gap-1.5 text-[12px] text-[#E8432D] border border-[#E8432D] px-3 py-1.5 rounded-full cursor-pointer">
-            <ImagePlus size={14} /> {t("上传新 Logo", "Upload New Logo")}
-            <input id="logo-input" type="file" accept="image/*" className="hidden" onChange={(e) => readImageFile(e.target.files?.[0], setLogoPreview)} />
+            <ImagePlus size={14} /> {logoUploading ? t("上传中…", "Uploading…") : t("上传新 Logo", "Upload New Logo")}
+            <input id="logo-input" type="file" accept="image/*" className="hidden" onChange={(e) => handleLogoChange(e.target.files?.[0])} />
           </label>
         </div>
         <p className="text-[10px] text-[#6B6456] mb-4">{t("若点击上传后没有反应，可能是当前预览环境限制了文件选择，可在浏览器中打开完整版重试。", "If nothing happens when you tap upload, this preview environment may be restricting file selection — try opening the full version in a browser.")}</p>
@@ -1079,14 +1158,16 @@ function EditIntroScreen({ intro, logo, photos, onBack, onSave, t, lang, setLang
           ))}
           <label htmlFor="company-photo-input" className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-[#C9973E] text-[#C69A3E] cursor-pointer" style={{ aspectRatio: "1/1" }}>
             <ImagePlus size={18} />
-            <span className="text-[10px]">{t("添加照片", "Add Photo")}</span>
+            <span className="text-[10px]">{photoUploading ? t("上传中…", "Uploading…") : t("添加照片", "Add Photo")}</span>
             <input id="company-photo-input" type="file" accept="image/*" className="hidden" onChange={(e) => { addPhoto(e.target.files?.[0]); e.target.value = ""; }} />
           </label>
         </div>
         <p className="text-[10px] text-[#6B6456]">{t('可以多次点击"添加照片"上传多张。', 'Tap "Add Photo" repeatedly to upload multiple photos.')}</p>
       </div>
       <div className="shrink-0 px-5 py-3 bg-[#FFFDF8] border-t border-[#EFE7D6]">
-        <button onClick={() => { onSave(text, logoPreview, photoList); onBack(); }} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium" style={{ background: "#E8432D" }}>{t("保存", "Save")}</button>
+        <button onClick={() => { onSave(text, logoPreview, photoList); onBack(); }} disabled={busy} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium disabled:opacity-60" style={{ background: "#E8432D" }}>
+          {busy ? t("图片上传中，请稍候…", "Uploading photo, please wait…") : t("保存", "Save")}
+        </button>
       </div>
     </div>
   );
@@ -1207,28 +1288,25 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [ev, intro2, logo2, photos2, regs, notifs, savedLang] = await Promise.all([
-        loadKey("events", true, initialEvents),
-        loadKey("companyIntro", true, DEFAULT_INTRO),
-        loadKey("companyLogo", true, DEFAULT_LOGO),
-        loadKey("companyPhotos", true, []),
-        loadKey("registrations", false, []),
-        loadKey("notifications", false, [{ text: "欢迎加入红点时光会员！", time: "系统消息" }]),
-        loadKey("lang", false, "zh"),
-      ]);
-      setEvents(ev); setIntro(intro2); setLogo(logo2); setPhotos(photos2);
-      setRegistrations(regs); setNotifications(notifs); setLang(savedLang);
+      const shared = await loadShared();
+      setEvents(shared?.events || initialEvents);
+      setIntro(shared?.intro || DEFAULT_INTRO);
+      setLogo(shared?.logo || DEFAULT_LOGO);
+      setPhotos(shared?.photos || []);
+      setRegistrations(loadPersonal("registrations", []));
+      setNotifications(loadPersonal("notifications", [{ text: "欢迎加入红点时光会员！", time: "系统消息" }]));
+      setLang(loadPersonal("lang", "zh"));
       setLoaded(true);
     })();
   }, []);
 
-  useEffect(() => { if (loaded) saveKey("events", true, events); }, [events, loaded]);
-  useEffect(() => { if (loaded) saveKey("companyIntro", true, intro); }, [intro, loaded]);
-  useEffect(() => { if (loaded) saveKey("companyLogo", true, logo); }, [logo, loaded]);
-  useEffect(() => { if (loaded) saveKey("companyPhotos", true, photos); }, [photos, loaded]);
-  useEffect(() => { if (loaded) saveKey("registrations", false, registrations); }, [registrations, loaded]);
-  useEffect(() => { if (loaded) saveKey("notifications", false, notifications); }, [notifications, loaded]);
-  useEffect(() => { if (loaded) saveKey("lang", false, lang); }, [lang, loaded]);
+  // 活动/公司介绍/Logo/相册 四项一起打包同步，减少请求次数
+  useEffect(() => {
+    if (loaded) saveShared({ events, intro, logo, photos });
+  }, [events, intro, logo, photos, loaded]);
+  useEffect(() => { if (loaded) savePersonal("registrations", registrations); }, [registrations, loaded]);
+  useEffect(() => { if (loaded) savePersonal("notifications", notifications); }, [notifications, loaded]);
+  useEffect(() => { if (loaded) savePersonal("lang", lang); }, [lang, loaded]);
 
   const notify = (text) => { setToast(text); setTimeout(() => setToast(""), 2600); };
 
