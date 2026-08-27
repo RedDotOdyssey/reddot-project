@@ -1,82 +1,45 @@
 /**
- * 红点时光探索之旅 - 报名数据后端（Google Apps Script）
+ * 红点时光探索之旅 - App 后端（Google Apps Script）v2
  * ------------------------------------------------------------
- * 用途：接收 App 发来的报名信息，写入 Google Sheet，并做基本的名额校验，
- *      防止两人同时抢最后一个名额时都报名成功（超卖）。
+ * 这一版新增两个功能，解决"换设备/刷新后活动和公司资料就消失"的问题：
  *
- * 部署步骤：
- * 1. 打开 https://sheets.google.com ，新建一个空白表格，命名为「红点时光报名记录」
- * 2. 菜单栏「扩展程序」→「Apps Script」，会打开一个新的代码编辑窗口
- * 3. 把这个文件里的全部代码复制粘贴进去，覆盖默认的 myFunction() 内容
- * 4. 点右上角「部署」→「新建部署」
- *    - 类型选择「Web 应用」
- *    - 说明随便填，比如「报名接口 v1」
- *    - 「执行身份」选「我」（你自己的 Google 账号）
- *    - 「谁可以访问」选「任何人」（这样 App 才能不登录就调用）
- * 5. 点「部署」，第一次会要求你授权，按提示允许即可
- * 6. 部署成功后会给你一个网址，形如：
- *    https://script.google.com/macros/s/AKfycb.../exec
- *    这个网址就是要填进 App.jsx 里 GOOGLE_SHEET_WEBHOOK_URL 常量的值
+ * 1. 「共享数据同步」：活动列表、公司介绍文字、Logo/相册图片网址，
+ *    统一存进这个表格新增的「AppData」工作表里，所有设备读到的都是同一份。
+ * 2. 「图片上传」：管理员上传的 Logo / 活动图片 / 公司相册照片，
+ *    会被转存到你的 Google Drive 里，返回一个图片网址存进表格
+ *    （图片本身不会直接塞进 Sheet 单元格，因为单元格能放的文字有上限，
+ *      图片转文字编码后很容易超过这个限制）。
  *
- * 以后如果改了代码，要「新建部署」一次新版本，网址才会生效最新代码
- * （或者用「管理部署」→ 编辑 → 更新现有部署也可以，网址不会变）
+ * 部署 / 更新步骤：
+ * 1. 打开你现有的 Google Sheet 对应的 Apps Script 编辑页面
+ * 2. 把这个文件的全部内容，覆盖粘贴替换掉原来的代码
+ * 3. 点右上角「部署」→「管理部署」→ 点编辑（铅笔）图标 → 「版本」选「新版本」→ 点「部署」
+ *    （用这种方式更新，网址不会变，不用再改 App.jsx 里的配置）
+ * 4. 第一次运行到 Drive 相关功能时，可能会再次弹出授权窗口，
+ *    要求"访问你的 Google 云端硬盘"，按提示允许即可
+ *    （这是因为新增了存图片到 Drive 的功能，需要多一项权限）
  */
 
+const APP_DATA_SHEET_NAME = "AppData";
+const REG_SHEET_NAME = "报名记录";
+const DRIVE_FOLDER_NAME = "红点时光探索之旅_图片";
+
 function doPost(e) {
-  // 用 LockService 给写入操作加锁，确保同一时间只有一个报名在处理，
-  // 避免两人几乎同时报名时，都读到"名额还没满"从而一起超卖
   var lock = LockService.getScriptLock();
-  lock.waitLock(15000); // 最多等待 15 秒
+  lock.waitLock(15000);
 
   try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName("报名记录") || ss.insertSheet("报名记录");
-
-    // 空表先写表头
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow([
-        "提交时间", "活动名称", "活动日期", "活动地点",
-        "姓名", "电话", "电邮", "报名人数", "金额(S$)", "签到状态",
-      ]);
-    }
-
     var data = JSON.parse(e.postData.contents);
 
-    var eventTitle = String(data.eventTitle || "").trim();
-    var qty = Math.max(1, Number(data.qty) || 1);
-    var cap = Number(data.cap) || 0;
-
-    // ---- 名额校验：统计该活动目前已登记的总人数，防止超卖 ----
-    if (cap > 0 && eventTitle) {
-      var rows = sheet.getDataRange().getValues();
-      var bookedCount = 0;
-      for (var i = 1; i < rows.length; i++) {
-        if (String(rows[i][1]).trim() === eventTitle) {
-          bookedCount += Number(rows[i][7]) || 0;
-        }
-      }
-      if (bookedCount + qty > cap) {
-        return jsonOutput({
-          success: false,
-          message: "抱歉，「" + eventTitle + "」仅剩 " + Math.max(0, cap - bookedCount) + " 个名额，报名人数超出剩余名额。",
-        });
-      }
+    if (data.action === "saveAppData") {
+      return saveAppData(data.payload);
+    }
+    if (data.action === "uploadImage") {
+      return uploadImageToDrive(data.base64, data.mimeType, data.filename);
     }
 
-    sheet.appendRow([
-      new Date(),
-      eventTitle,
-      data.eventDate || "",
-      data.eventLocation || "",
-      data.name || "",
-      data.phone || "",
-      data.email || "",
-      qty,
-      data.price || 0,
-      "待签到",
-    ]);
-
-    return jsonOutput({ success: true, message: "报名信息已记录" });
+    // 没有 action 字段的请求，按"报名信息"处理（原有逻辑）
+    return handleRegistration(data);
   } catch (err) {
     return jsonOutput({ success: false, message: "服务器出错：" + err.toString() });
   } finally {
@@ -84,11 +47,125 @@ function doPost(e) {
   }
 }
 
-// 浏览器直接打开这个网址时显示的提示（方便你确认部署是否成功）
 function doGet(e) {
+  if (e.parameter.action === "getAppData") {
+    return getAppData();
+  }
   return ContentService.createTextOutput(
     "此接口仅接受 POST 请求，用于红点时光探索之旅报名系统。若看到这行字，说明部署已经成功。"
   );
+}
+
+/* ---------------- 报名信息（原有功能，不变） ---------------- */
+
+function handleRegistration(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(REG_SHEET_NAME) || ss.insertSheet(REG_SHEET_NAME);
+
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow([
+      "提交时间", "活动名称", "活动日期", "活动地点",
+      "姓名", "电话", "电邮", "报名人数", "金额(S$)", "签到状态",
+    ]);
+  }
+
+  var eventTitle = String(data.eventTitle || "").trim();
+  var qty = Math.max(1, Number(data.qty) || 1);
+  var cap = Number(data.cap) || 0;
+
+  if (cap > 0 && eventTitle) {
+    var rows = sheet.getDataRange().getValues();
+    var bookedCount = 0;
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][1]).trim() === eventTitle) {
+        bookedCount += Number(rows[i][7]) || 0;
+      }
+    }
+    if (bookedCount + qty > cap) {
+      return jsonOutput({
+        success: false,
+        message: "抱歉，「" + eventTitle + "」仅剩 " + Math.max(0, cap - bookedCount) + " 个名额，报名人数超出剩余名额。",
+      });
+    }
+  }
+
+  sheet.appendRow([
+    new Date(), eventTitle, data.eventDate || "", data.eventLocation || "",
+    data.name || "", data.phone || "", data.email || "",
+    qty, data.price || 0, "待签到",
+  ]);
+
+  return jsonOutput({ success: true, message: "报名信息已记录" });
+}
+
+/* ---------------- 共享数据同步（新增） ---------------- */
+
+function getAppDataSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(APP_DATA_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(APP_DATA_SHEET_NAME);
+    sheet.appendRow(["key", "value", "更新时间"]);
+    sheet.appendRow(["shared", "", ""]);
+  }
+  return sheet;
+}
+
+function getAppData() {
+  var sheet = getAppDataSheet_();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (rows[i][0] === "shared") {
+      var raw = rows[i][1];
+      return jsonOutput({ success: true, data: raw ? JSON.parse(raw) : null });
+    }
+  }
+  return jsonOutput({ success: true, data: null });
+}
+
+function saveAppData(payload) {
+  var sheet = getAppDataSheet_();
+  var rows = sheet.getDataRange().getValues();
+  var rowIndex = -1;
+  for (var i = 1; i < rows.length; i++) {
+    if (rows[i][0] === "shared") {
+      rowIndex = i + 1; // 表格行号从1开始
+      break;
+    }
+  }
+  var json = JSON.stringify(payload);
+  if (rowIndex === -1) {
+    sheet.appendRow(["shared", json, new Date()]);
+  } else {
+    sheet.getRange(rowIndex, 2).setValue(json);
+    sheet.getRange(rowIndex, 3).setValue(new Date());
+  }
+  return jsonOutput({ success: true });
+}
+
+/* ---------------- 图片上传到 Google Drive（新增） ---------------- */
+
+function getOrCreateFolder_() {
+  var folders = DriveApp.getFoldersByName(DRIVE_FOLDER_NAME);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(DRIVE_FOLDER_NAME);
+}
+
+function uploadImageToDrive(base64, mimeType, filename) {
+  try {
+    var folder = getOrCreateFolder_();
+    var cleanBase64 = base64.indexOf(",") > -1 ? base64.split(",")[1] : base64; // 去掉 data:image/...;base64, 前缀
+    var bytes = Utilities.base64Decode(cleanBase64);
+    var blob = Utilities.newBlob(bytes, mimeType || "image/jpeg", filename || "image.jpg");
+    var file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    // 用这种格式的网址，<img> 标签能比较稳定地直接显示 Drive 图片
+    var url = "https://lh3.googleusercontent.com/d/" + file.getId();
+    return jsonOutput({ success: true, url: url });
+  } catch (err) {
+    return jsonOutput({ success: false, message: "图片上传失败：" + err.toString() });
+  }
 }
 
 function jsonOutput(obj) {
