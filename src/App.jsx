@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import {
   Search, MapPin, Clock, Ticket, Star, Camera, QrCode, Share2,
@@ -83,7 +83,7 @@ const DEFAULT_INTRO =
 
 // 把这里换成你自己部署的 Google Apps Script Web App 网址（见 GoogleSheetBackend.gs 部署说明）
 // 留空（""）则跳过同步，退回到"仅本次浏览器会话内存"的演示模式
-const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwK-R00QdfzCfDyVgmJ21lanC6UCwBHo97twmrp7s6y3Obx30MEITgQEcylqFwvcuon/exec";
+const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyMKz0SyP74neQTy3bTo38IvaKNH7EadCubjsoEep1O6LqfQ5henawxScZTY8Sc4YQDuw/exec";
 
 // 共享数据（活动列表 / 公司介绍 / Logo / 相册）：所有人、所有设备看到的都是同一份，
 // 存在 Google Sheet 的 AppData 工作表里，通过 Apps Script 读写
@@ -198,7 +198,8 @@ async function geocodeAddress(query) {
 }
 
 function buildShareUrl(event) {
-  return `https://reddottimetravel.example/events/${event.id}`;
+  const origin = typeof window !== "undefined" && window.location ? window.location.origin : "";
+  return `${origin}/events/${event.id}`;
 }
 function openWhatsApp(event) {
   const text = encodeURIComponent(`${event.title} · ${event.date} · ${event.location}\n${buildShareUrl(event)}`);
@@ -1270,6 +1271,50 @@ function CheckinScannerScreen({ events, onBack, onToggle, t, lang, setLang }) {
   );
 }
 
+// 管理后台密码——建议改成你自己的密码。
+// 注意：这只是"挡住普通客户不小心点进去"的轻量门槛，不是真正的账号系统——
+// 因为整个网站的代码是公开可见的静态文件，懂技术的人理论上仍能在源码里找到这个密码。
+// 如果以后有真正需要严格保密的后台数据，需要接入正式的登录系统（见开发需求文档"技术架构建议"）。
+const ADMIN_PASSWORD = "reddot2026";
+
+function AdminGate({ children, t, lang, setLang }) {
+  const [unlocked, setUnlocked] = useState(() => loadPersonal("adminUnlocked", false));
+  const [pwd, setPwd] = useState("");
+  const [error, setError] = useState("");
+
+  if (unlocked) return children;
+
+  const submit = () => {
+    if (pwd === ADMIN_PASSWORD) {
+      savePersonal("adminUnlocked", true);
+      setUnlocked(true);
+    } else {
+      setError(t("密码不正确，请重试", "Incorrect password, please try again"));
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col" style={{ background: "#FFFDF8" }}>
+      <TopBar title={t("管理后台", "Admin")} lang={lang} setLang={setLang} />
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-10 flex flex-col items-center">
+        <ShieldCheck size={40} color="#C69A3E" />
+        <p className="text-[13px] text-[#1F2430] mt-4 mb-4 text-center">{t("请输入管理员密码", "Please enter the admin password")}</p>
+        <input
+          type="password" value={pwd}
+          onChange={(e) => { setPwd(e.target.value); setError(""); }}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          className="w-full max-w-[280px] bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[13px] outline-none text-center mb-3"
+          placeholder={t("密码", "Password")}
+        />
+        {error && <p className="text-[11.5px] text-[#E8432D] mb-3">{error}</p>}
+        <button onClick={submit} className="w-full max-w-[280px] py-2.5 rounded-full text-[#FFFDF8] font-medium" style={{ background: "#E8432D" }}>
+          {t("进入", "Enter")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- App 主体 ---------- */
 export default function App() {
   const [tab, setTab] = useState("home");
@@ -1283,13 +1328,15 @@ export default function App() {
   const [photos, setPhotos] = useState([]);
   const [lang, setLang] = useState("zh");
   const [loaded, setLoaded] = useState(false);
+  const skipFirstSharedSave = useRef(true);
 
   const t = (zh, en) => (lang === "zh" ? zh : en ?? zh);
 
   useEffect(() => {
     (async () => {
       const shared = await loadShared();
-      setEvents(shared?.events || initialEvents);
+      const loadedEvents = shared?.events || initialEvents;
+      setEvents(loadedEvents);
       setIntro(shared?.intro || DEFAULT_INTRO);
       setLogo(shared?.logo || DEFAULT_LOGO);
       setPhotos(shared?.photos || []);
@@ -1297,12 +1344,51 @@ export default function App() {
       setNotifications(loadPersonal("notifications", [{ text: "欢迎加入红点时光会员！", time: "系统消息" }]));
       setLang(loadPersonal("lang", "zh"));
       setLoaded(true);
+
+      // 深链接：如果是通过分享出去的活动链接（/events/活动ID）直接打开的，
+      // 加载完数据后自动跳到对应的活动详情，而不是停在首页
+      const m = window.location.pathname.match(/^\/events\/(.+)$/);
+      if (m) {
+        const found = loadedEvents.find((e) => String(e.id) === m[1]);
+        if (found) setSelected(found);
+      }
     })();
   }, []);
 
-  // 活动/公司介绍/Logo/相册 四项一起打包同步，减少请求次数
+  // 浏览器地址栏跟随当前打开的活动同步变化，这样分享出去的链接、
+  // 以及浏览器的"后退/前进"按钮才能正常工作
   useEffect(() => {
-    if (loaded) saveShared({ events, intro, logo, photos });
+    if (!loaded) return;
+    const path = selected ? `/events/${selected.id}` : "/";
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, "", path);
+    }
+  }, [selected, loaded]);
+
+  // 支持浏览器的"后退"按钮：从活动详情后退时回到首页
+  useEffect(() => {
+    const onPopState = () => {
+      const m = window.location.pathname.match(/^\/events\/(.+)$/);
+      if (m) {
+        const found = events.find((e) => String(e.id) === m[1]);
+        setSelected(found || null);
+      } else {
+        setSelected(null);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [events]);
+
+  // 活动/公司介绍/Logo/相册 四项一起打包同步，减少请求次数
+  // 刚加载完的第一次不回写（读到什么就是什么，不需要再存一遍），只在之后真正发生改动时才同步
+  useEffect(() => {
+    if (!loaded) return;
+    if (skipFirstSharedSave.current) {
+      skipFirstSharedSave.current = false;
+      return;
+    }
+    saveShared({ events, intro, logo, photos });
   }, [events, intro, logo, photos, loaded]);
   useEffect(() => { if (loaded) savePersonal("registrations", registrations); }, [registrations, loaded]);
   useEffect(() => { if (loaded) savePersonal("notifications", notifications); }, [notifications, loaded]);
@@ -1384,7 +1470,12 @@ export default function App() {
   else if (tab === "chat") body = <ChatScreen t={t} lang={lang} setLang={setLang} />;
   else if (tab === "profile") body = <ProfileScreen notify={notify} registrations={registrations} notifications={notifications} intro={intro} logo={logo} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "about") body = <AboutScreen intro={intro} logo={logo} photos={photos} t={t} lang={lang} setLang={setLang} />;
-  else if (tab === "admin") body = <AdminScreen events={events} addEvent={addEvent} updateEvent={updateEvent} toggleAttendee={toggleAttendee} intro={intro} logo={logo} photos={photos} onSaveIntro={onSaveIntro} notify={notify} setEventCoords={setEventCoords} relocateAllEvents={relocateAllEvents} t={t} lang={lang} setLang={setLang} />;
+  else if (tab === "admin")
+    body = (
+      <AdminGate t={t} lang={lang} setLang={setLang}>
+        <AdminScreen events={events} addEvent={addEvent} updateEvent={updateEvent} toggleAttendee={toggleAttendee} intro={intro} logo={logo} photos={photos} onSaveIntro={onSaveIntro} notify={notify} setEventCoords={setEventCoords} relocateAllEvents={relocateAllEvents} t={t} lang={lang} setLang={setLang} />
+      </AdminGate>
+    );
 
   return (
     <div className="w-full h-screen flex justify-center" style={{ background: "#E7DFCC", fontFamily: "'Noto Sans SC', sans-serif" }}>
