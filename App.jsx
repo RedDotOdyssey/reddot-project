@@ -4,7 +4,7 @@ import {
   Search, MapPin, Clock, Ticket, Star, Camera, QrCode, Share2,
   Bell, MessageCircle, User, Home, ShieldCheck, ChevronLeft,
   Download, Send, CheckCircle2, Navigation, TrendingUp, Users, Wallet,
-  Plus, Pencil, Check, ImagePlus, Info, Copy,
+  Plus, Pencil, Check, ImagePlus, Info, Copy, Trash2, RotateCcw,
 } from "lucide-react";
 
 /* ---------------- 品牌 Token ----------------
@@ -685,7 +685,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, logo, t, lang, s
 }
 
 /* ---------- 我的（会员中心） ---------- */
-function ProfileScreen({ notify, registrations, notifications, intro, logo, t, lang, setLang }) {
+function ProfileScreen({ notify, registrations, notifications, intro, logo, cancelRegistration, t, lang, setLang }) {
   const [view, setView] = useState("main");
 
   if (view === "regs") {
@@ -706,6 +706,14 @@ function ProfileScreen({ notify, registrations, notifications, intro, logo, t, l
                   <p className="text-[11px] text-[#6B6456] mt-1 flex items-center gap-1"><Clock size={11} /> {r.date}</p>
                   <p className="text-[11px] text-[#6B6456] mt-0.5 flex items-center gap-1"><MapPin size={11} /> {r.location}</p>
                   {r.name && <p className="text-[10.5px] text-[#6B6456] mt-1">{t("联系人", "Contact")}：{r.name} · {r.phone} · {t("人数", "Pax")} {r.qty || 1}</p>}
+                  {r.id != null && (
+                    <button
+                      onClick={() => cancelRegistration(r, i)}
+                      className="mt-2 text-[11px] text-[#E8432D] border border-[#E8432D] px-3 py-1 rounded-full"
+                    >
+                      {t("取消报名", "Cancel Booking")}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -839,7 +847,7 @@ function ChatScreen({ t, lang, setLang }) {
 }
 
 /* ---------- 后台分析 ---------- */
-function AdminScreen({ events, addEvent, updateEvent, toggleAttendee, intro, logo, photos, onSaveIntro, notify, setEventCoords, relocateAllEvents, t, lang, setLang }) {
+function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttendee, intro, logo, photos, onSaveIntro, notify, setEventCoords, relocateAllEvents, activeMembers, setActiveMembers, resetStats, t, lang, setLang }) {
   const [view, setView] = useState("main");
   const [coordsEventId, setCoordsEventId] = useState(null);
   const [editEventId, setEditEventId] = useState(null);
@@ -909,18 +917,30 @@ function AdminScreen({ events, addEvent, updateEvent, toggleAttendee, intro, log
         {[
           { label: t("累计报名人数", "Total Bookings"), value: totalReg, icon: Users },
           { label: t("累计收入 (S$)", "Total Revenue (S$)"), value: revenue, icon: TrendingUp },
-          { label: t("活跃会员", "Active Members"), value: 128, icon: User },
+          {
+            label: t("活跃会员", "Active Members"), value: activeMembers, icon: User,
+            onClick: () => {
+              const val = window.prompt(t("输入活跃会员数", "Enter active member count"), String(activeMembers));
+              if (val !== null && !isNaN(Number(val))) setActiveMembers(Math.max(0, Math.round(Number(val))));
+            },
+          },
           { label: t("本月活动数", "Events This Month"), value: events.length, icon: Ticket },
         ].map((c, i) => {
           const Icon = c.icon;
+          const Wrapper = c.onClick ? "button" : "div";
           return (
-            <div key={i} className="bg-[#FFFDF8] rounded-xl p-3.5 border border-[#EFE7D6]">
+            <Wrapper key={i} onClick={c.onClick} className="bg-[#FFFDF8] rounded-xl p-3.5 border border-[#EFE7D6] text-left">
               <Icon size={16} color="#E8432D" />
               <p className="text-[19px] font-semibold text-[#1F2430] mt-1.5">{c.value}</p>
-              <p className="text-[10.5px] text-[#6B6456]">{c.label}</p>
-            </div>
+              <p className="text-[10.5px] text-[#6B6456]">{c.label}{c.onClick && <Pencil size={9} className="inline ml-1" />}</p>
+            </Wrapper>
           );
         })}
+      </div>
+      <div className="px-4 mt-3">
+        <button onClick={resetStats} className="w-full flex items-center justify-center gap-1.5 py-2 rounded-full border border-[#C9973E] text-[11.5px] text-[#C69A3E]">
+          <RotateCcw size={12} /> {t("清零所有统计数据", "Reset All Stats")}
+        </button>
       </div>
       <div className="px-4 mt-5">
         <div className="flex items-center justify-between mb-2">
@@ -931,6 +951,13 @@ function AdminScreen({ events, addEvent, updateEvent, toggleAttendee, intro, log
           {events.map((e, i) => (
             <div key={e.id} className={`flex items-center justify-between px-3.5 py-3 text-[12px] gap-2 ${i !== 0 ? "border-t border-[#EFE7D6]" : ""}`}>
               <span className="text-[#1F2430] truncate flex-1">{e.title}</span>
+              <button
+                onClick={() => deleteEvent(e.id, e.title)}
+                title={t("删除活动", "Delete event")}
+                className="shrink-0 text-[#6B6456] p-1"
+              >
+                <Trash2 size={13} />
+              </button>
               <button
                 onClick={() => { setTemplateEventId(e.id); setView("publish"); }}
                 title={t("用作模板创建新活动", "Use as template for a new event")}
@@ -1356,6 +1383,7 @@ export default function App() {
   const [intro, setIntro] = useState(DEFAULT_INTRO);
   const [logo, setLogo] = useState(DEFAULT_LOGO);
   const [photos, setPhotos] = useState([]);
+  const [activeMembers, setActiveMembers] = useState(0);
   const [lang, setLang] = useState("zh");
   const [loaded, setLoaded] = useState(false);
   const skipFirstSharedSave = useRef(true);
@@ -1370,6 +1398,7 @@ export default function App() {
       setIntro(shared?.intro || DEFAULT_INTRO);
       setLogo(shared?.logo || DEFAULT_LOGO);
       setPhotos(shared?.photos || []);
+      setActiveMembers(shared?.activeMembers || 0);
       setRegistrations(loadPersonal("registrations", []));
       setNotifications(loadPersonal("notifications", [{ text: "欢迎加入红点时光会员！", time: "系统消息" }]));
       setLang(loadPersonal("lang", "zh"));
@@ -1410,7 +1439,7 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, [events]);
 
-  // 活动/公司介绍/Logo/相册 四项一起打包同步，减少请求次数
+  // 活动/公司介绍/Logo/相册/活跃会员数 一起打包同步，减少请求次数
   // 刚加载完的第一次不回写（读到什么就是什么，不需要再存一遍），只在之后真正发生改动时才同步
   useEffect(() => {
     if (!loaded) return;
@@ -1418,8 +1447,8 @@ export default function App() {
       skipFirstSharedSave.current = false;
       return;
     }
-    saveShared({ events, intro, logo, photos });
-  }, [events, intro, logo, photos, loaded]);
+    saveShared({ events, intro, logo, photos, activeMembers });
+  }, [events, intro, logo, photos, activeMembers, loaded]);
   useEffect(() => { if (loaded) savePersonal("registrations", registrations); }, [registrations, loaded]);
   useEffect(() => { if (loaded) savePersonal("notifications", notifications); }, [notifications, loaded]);
   useEffect(() => { if (loaded) savePersonal("lang", lang); }, [lang, loaded]);
@@ -1433,7 +1462,7 @@ export default function App() {
       return { ok: false, message: sync.message || t("名额不足，请调整报名人数", "Not enough spots left — please adjust the party size") };
     }
     setRegistrations((r) => [
-      { title: event.title, date: event.date, location: event.location, price: event.price * qty, qty, name: info?.name, phone: info?.phone, email: info?.email },
+      { id: event.id, title: event.title, date: event.date, location: event.location, price: event.price * qty, qty, name: info?.name, phone: info?.phone, email: info?.email },
       ...r,
     ]);
     setNotifications((n) => [{ text: t(`您已成功报名「${event.title}」× ${qty}，活动开始前我们会再次提醒您。`, `You're booked for "${event.title}" × ${qty} — we'll remind you before it starts.`), time: event.date }, ...n]);
@@ -1471,6 +1500,39 @@ export default function App() {
     setEvents((evs) => evs.map((e) => (e.id === id ? { ...e, coords } : e)));
   };
 
+  const deleteEvent = (id, title) => {
+    const ok = window.confirm(t(`确定要删除「${title}」吗？此操作不可撤销。`, `Delete "${title}"? This cannot be undone.`));
+    if (!ok) return;
+    setEvents((evs) => evs.filter((e) => e.id !== id));
+    notify(t("活动已删除", "Event deleted"));
+  };
+
+  const resetStats = () => {
+    const ok = window.confirm(t(
+      "确定要清零所有统计数据吗？会把每个活动的已报名人数、签到名单都重置为 0，活跃会员数也会归零。此操作不可撤销，且不会影响 Google Sheet 里已有的报名记录（那份记录仍会保留作为历史存档）。",
+      "Reset all stats? This clears each event's booked count and check-in list to zero, and resets active members to zero. This cannot be undone, and does not affect the existing records already in your Google Sheet (those remain as a historical log)."
+    ));
+    if (!ok) return;
+    setEvents((evs) => evs.map((e) => ({ ...e, reg: 0, attendees: [] })));
+    setActiveMembers(0);
+    notify(t("统计数据已清零", "Stats have been reset"));
+  };
+
+  const cancelRegistration = (reg, idx) => {
+    const ok = window.confirm(t(`确定要取消「${reg.title}」这笔报名吗？`, `Cancel your booking for "${reg.title}"?`));
+    if (!ok) return;
+    setEvents((evs) => evs.map((e) => {
+      if (e.id !== reg.id) return e;
+      const qty = reg.qty || 1;
+      const attendees = [...(e.attendees || [])];
+      const matchIdx = attendees.findIndex((a) => a.name === reg.name && a.phone === reg.phone);
+      if (matchIdx > -1) attendees.splice(matchIdx, 1);
+      return { ...e, reg: Math.max(0, e.reg - qty), attendees };
+    }));
+    setRegistrations((rs) => rs.filter((_, i) => i !== idx));
+    notify(t("已取消报名", "Booking cancelled"));
+  };
+
   const relocateAllEvents = async () => {
     notify(t("正在批量重新定位所有活动坐标…", "Bulk re-locating all event coordinates…"));
     const results = await Promise.all(
@@ -1498,12 +1560,12 @@ export default function App() {
     body = <DetailScreen event={liveEvent} onBack={() => setSelected(null)} notify={notify} addRegistration={addRegistration} logo={logo} t={t} lang={lang} setLang={setLang} />;
   } else if (tab === "home") body = <HomeScreen events={events} onOpen={setSelected} logo={logo} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "chat") body = <ChatScreen t={t} lang={lang} setLang={setLang} />;
-  else if (tab === "profile") body = <ProfileScreen notify={notify} registrations={registrations} notifications={notifications} intro={intro} logo={logo} t={t} lang={lang} setLang={setLang} />;
+  else if (tab === "profile") body = <ProfileScreen notify={notify} registrations={registrations} notifications={notifications} intro={intro} logo={logo} cancelRegistration={cancelRegistration} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "about") body = <AboutScreen intro={intro} logo={logo} photos={photos} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "admin")
     body = (
       <AdminGate t={t} lang={lang} setLang={setLang}>
-        <AdminScreen events={events} addEvent={addEvent} updateEvent={updateEvent} toggleAttendee={toggleAttendee} intro={intro} logo={logo} photos={photos} onSaveIntro={onSaveIntro} notify={notify} setEventCoords={setEventCoords} relocateAllEvents={relocateAllEvents} t={t} lang={lang} setLang={setLang} />
+        <AdminScreen events={events} addEvent={addEvent} updateEvent={updateEvent} deleteEvent={deleteEvent} toggleAttendee={toggleAttendee} intro={intro} logo={logo} photos={photos} onSaveIntro={onSaveIntro} notify={notify} setEventCoords={setEventCoords} relocateAllEvents={relocateAllEvents} activeMembers={activeMembers} setActiveMembers={setActiveMembers} resetStats={resetStats} t={t} lang={lang} setLang={setLang} />
       </AdminGate>
     );
 
