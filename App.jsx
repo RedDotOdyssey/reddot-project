@@ -184,7 +184,7 @@ function openMapSearch(addressText) {
 }
 const FALLBACK_COORDS = "1.2868,103.8545"; // 鱼尾狮公园，中心城区标志性地标，作为定位失败时的保底坐标
 
-async function syncRegistrationToSheet(event, info, qty) {
+async function syncRegistrationToSheet(event, info, qty, paymentStatus) {
   if (!GOOGLE_SHEET_WEBHOOK_URL) return { ok: true, blocked: false, message: "" }; // 未配置，跳过同步
   try {
     const res = await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
@@ -201,6 +201,7 @@ async function syncRegistrationToSheet(event, info, qty) {
         qty,
         price: event.price * qty,
         cap: event.cap,
+        paymentStatus: paymentStatus || "paid",
       }),
     });
     const data = await res.json();
@@ -506,6 +507,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
   const [regForm, setRegForm] = useState({ name: profile?.name || "", phone: profile?.phone || "", email: profile?.email || "", qty: "1" });
   const [regError, setRegError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [ticketPaymentStatus, setTicketPaymentStatus] = useState("paid");
 
   const handleReviewPhoto = (file) => {
     readImageFile(file, async (localUrl) => {
@@ -554,18 +556,35 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
 
   if (stage === "regInfo") {
     const set = (k) => (e) => setRegForm({ ...regForm, [k]: e.target.value });
-    const submit = () => {
+    const validate = () => {
       const qty = Math.max(1, Number(regForm.qty) || 1);
       if (!regForm.name.trim() || !regForm.phone.trim() || !regForm.email.trim()) {
         setRegError(t("请填写姓名、电话和电邮", "Please fill in name, phone and email"));
-        return;
+        return false;
       }
       if (qty > remaining) {
         setRegError(t(`当前仅剩 ${remaining} 个名额，请调整报名人数`, `Only ${remaining} spots left — please adjust the number of attendees`));
-        return;
+        return false;
       }
       setRegError("");
+      return true;
+    };
+    const goPayNow = () => {
+      if (!validate()) return;
       setStage("pay");
+    };
+    const payLater = async () => {
+      if (!validate()) return;
+      setSubmitting(true);
+      const result = await addRegistration(event, regForm, "pending");
+      setSubmitting(false);
+      if (!result.ok) {
+        notify(result.message);
+        return;
+      }
+      setTicketPaymentStatus("pending");
+      setStage("ticket");
+      notify(t("已为你占好名额，请尽快完成支付", "Your spot is reserved — please complete payment soon"));
     };
     return (
       <div className="h-full flex flex-col" style={{ background: "#FFFDF8" }}>
@@ -584,9 +603,12 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
           </div>
           {regError && <p className="text-[11.5px] text-[#E8432D] mt-3">{regError}</p>}
         </div>
-        <div className="shrink-0 px-5 py-3 bg-[#FFFDF8] border-t border-[#EFE7D6]">
-          <button onClick={submit} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium" style={{ background: "#E8432D" }}>
-            {t("下一步 · 支付", "Next · Pay")} S${(event.price * Math.max(1, Number(regForm.qty) || 1)).toFixed(0)}
+        <div className="shrink-0 px-5 py-3 bg-[#FFFDF8] border-t border-[#EFE7D6] flex flex-col gap-2">
+          <button onClick={goPayNow} disabled={submitting} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium disabled:opacity-60" style={{ background: "#E8432D" }}>
+            {t("立即支付", "Pay Now")} · S${(event.price * Math.max(1, Number(regForm.qty) || 1)).toFixed(0)}
+          </button>
+          <button onClick={payLater} disabled={submitting} className="w-full py-3 rounded-full font-medium disabled:opacity-60 border border-[#3E567D] text-[#3E567D]">
+            {submitting ? t("正在提交…", "Submitting…") : t("先占位，稍后支付", "Reserve Now, Pay Later")}
           </button>
         </div>
       </div>
@@ -608,12 +630,13 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
           <button
             onClick={async () => {
               setSubmitting(true);
-              const result = await addRegistration(event, regForm);
+              const result = await addRegistration(event, regForm, "paid");
               setSubmitting(false);
               if (!result.ok) {
                 notify(result.message);
                 return;
               }
+              setTicketPaymentStatus("paid");
               setStage("ticket");
               notify((t("报名成功！", "Booking confirmed!") + " " + (result.message || "")).trim());
             }}
@@ -629,21 +652,37 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
   }
 
   if (stage === "ticket") {
+    const isPending = ticketPaymentStatus === "pending";
     return (
       <div className="h-full flex flex-col" style={{ background: "#FFFDF8" }}>
         <TopBar title={t("我的电子票", "My E-Ticket")} onBack={onBack} lang={lang} setLang={setLang} />
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-6">
+          {isPending && (
+            <div className="rounded-xl px-3.5 py-2.5 mb-3 flex items-center gap-2" style={{ background: "#FBF3E0" }}>
+              <Wallet size={15} color="#C69A3E" />
+              <p className="text-[11.5px] text-[#8A6D2F]">{t("名额已为你占好，还未完成支付，请尽快扫码转账。", "Your spot is reserved but payment is still pending — please scan the QR below to pay soon.")}</p>
+            </div>
+          )}
           <div className="rounded-2xl p-5 text-[#FFFDF8] relative overflow-hidden" style={{ background: "#3E567D" }}>
             <p className="text-[10px] tracking-[3px] text-[#C69A3E]">E-TICKET</p>
             <h3 className="text-[17px] font-semibold mt-1 mb-3" style={{ fontFamily: "'Noto Serif SC', serif" }}>{event.title}</h3>
             <div className="flex justify-between text-[11px] text-[#C9C2B0] mb-1"><span>{t("持票人", "Ticket holder")}</span><span>{regForm.name || t("访客", "Guest")} × {regForm.qty || 1}</span></div>
             <div className="flex justify-between text-[11px] text-[#C9C2B0] mb-1"><span>{t("时间", "Time")}</span><span>{event.date}</span></div>
-            <div className="flex justify-between text-[11px] text-[#C9C2B0]"><span>{t("地点", "Location")}</span><span>{event.location}</span></div>
+            <div className="flex justify-between text-[11px] text-[#C9C2B0] mb-1"><span>{t("地点", "Location")}</span><span>{event.location}</span></div>
+            <div className="flex justify-between text-[11px] text-[#C9C2B0]"><span>{t("支付状态", "Payment")}</span><span style={{ color: isPending ? "#E8C36B" : "#9FD8B8" }}>{isPending ? t("待付款", "Pending") : t("已支付", "Paid")}</span></div>
             <div className="border-t border-dashed border-white/20 my-3" />
             <div className="bg-white rounded-xl p-3 flex items-center justify-center"><QrCode size={100} color="#3E567D" /></div>
             <p className="text-center text-[10px] font-mono text-[#C9C2B0] mt-2">{t("票号", "Ticket #")} RDTT-{event.id}0826-{Math.floor(Math.random() * 9000 + 1000)}</p>
             <p className="text-center text-[9.5px] text-[#8B95A8] mt-1">{t("这个二维码是您本次报名专属的电子票凭证", "This QR code is your unique e-ticket for this booking")}</p>
           </div>
+          {isPending && (
+            <div className="mt-4 flex flex-col items-center bg-[#F6F1E7] rounded-2xl p-4">
+              <p className="text-[11.5px] text-[#4A4438] mb-3">{t("随时可以扫这个码完成支付", "Scan this anytime to complete your payment")}</p>
+              <div className="w-40 rounded-xl bg-white border border-[#E7DFCC] p-2.5">
+                <img src={PAYNOW_QR_URI} alt="PayNow QR" className="w-full h-auto" />
+              </div>
+            </div>
+          )}
           <div className="flex gap-3 mt-4">
             <button onClick={() => openMapNavigation(event)} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full border border-[#3E567D] text-[12px]"><Navigation size={14} /> {t("地图导航", "Directions")}</button>
             <button onClick={() => goShare("ticket")} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full border border-[#3E567D] text-[12px]"><Share2 size={14} /> {t("分享给好友", "Share")}</button>
@@ -944,9 +983,10 @@ function AboutScreen({ intro, logo, photos, t, lang, setLang }) {
 }
 
 /* ---------- 客服聊天 ---------- */
-function ChatScreen({ t, lang, setLang }) {
+function ChatScreen({ contacts, t, lang, setLang }) {
   const [msgs, setMsgs] = useState([{ from: "bot", text: t("您好,我是红点小助手,有什么可以帮您?", "Hi, I'm the Red Dot assistant — how can I help you?") }]);
   const [input, setInput] = useState("");
+  const [viewing, setViewing] = useState(null);
   const faqs = [
     t("如何取消报名？", "How do I cancel a booking?"),
     t("PayNow 支付失败怎么办？", "What if my PayNow payment fails?"),
@@ -958,8 +998,23 @@ function ChatScreen({ t, lang, setLang }) {
     setTimeout(() => setMsgs((m) => [...m, { from: "bot", text: t("已收到您的问题,人工客服将在 5 分钟内回复您～（演示回复）", "Got your question — a support agent will reply within 5 minutes (demo reply)") }]), 500);
   };
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" style={{ position: "relative" }}>
       <TopBar title={t("在线客服", "Live Support")} lang={lang} setLang={setLang} />
+      {contacts && contacts.length > 0 && (
+        <div className="px-4 pt-3 pb-1 border-b border-[#EFE7D6]">
+          <p className="text-[11px] text-[#6B6456] mb-2">{t("扫码添加我们", "Scan to contact us")}</p>
+          <div className="flex gap-2.5 overflow-x-auto pb-1">
+            {contacts.map((c, i) => (
+              <button key={i} onClick={() => setViewing(c)} className="shrink-0 flex flex-col items-center gap-1">
+                <div className="w-16 h-16 rounded-lg overflow-hidden bg-[#F6F1E7] border border-[#E7DFCC] flex items-center justify-center">
+                  <img src={c.qr} alt={c.label} className="w-full h-full object-contain" />
+                </div>
+                <span className="text-[10px] text-[#6B6456]">{c.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="flex-1 px-4 py-4 flex flex-col gap-2.5 overflow-y-auto">
         {msgs.map((m, i) => (
           <div key={i} className={`max-w-[75%] px-3.5 py-2 rounded-2xl text-[12.5px] ${m.from === "bot" ? "bg-[#F1EAD9] self-start text-[#1F2430]" : "bg-[#3E567D] text-[#F6F1E7] self-end"}`}>{m.text}</div>
@@ -972,12 +1027,25 @@ function ChatScreen({ t, lang, setLang }) {
         <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={t("输入您的问题...", "Type your question...")} className="flex-1 bg-[#F1EAD9] rounded-full px-4 py-2.5 text-[12.5px] outline-none" />
         <button onClick={() => send(input)} className="p-2.5 rounded-full" style={{ background: "#E8432D" }}><Send size={14} color="#fff" /></button>
       </div>
+      {viewing && (
+        <div
+          onClick={() => setViewing(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.9)" }}
+          className="flex flex-col items-center justify-center p-6"
+        >
+          <div className="bg-white rounded-2xl p-4 max-w-[280px] w-full">
+            <img src={viewing.qr} alt={viewing.label} className="w-full h-auto" />
+          </div>
+          <p className="text-white text-[13px] mt-3">{viewing.label}</p>
+          <button onClick={() => setViewing(null)} className="absolute top-4 right-4 text-white text-[13px] bg-white/15 rounded-full w-9 h-9 flex items-center justify-center">✕</button>
+        </div>
+      )}
     </div>
   );
 }
 
 /* ---------- 后台分析 ---------- */
-function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttendee, intro, logo, photos, onSaveIntro, notify, setEventCoords, relocateAllEvents, activeMembers, setActiveMembers, resetStats, t, lang, setLang }) {
+function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttendee, intro, logo, photos, onSaveIntro, notify, setEventCoords, relocateAllEvents, activeMembers, setActiveMembers, resetStats, contacts, setContacts, t, lang, setLang }) {
   const [view, setView] = useState("main");
   const [coordsEventId, setCoordsEventId] = useState(null);
   const [editEventId, setEditEventId] = useState(null);
@@ -1036,6 +1104,14 @@ function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttende
       />
     );
   }
+  if (view === "manageContacts")
+    return (
+      <ManageContactsScreen
+        contacts={contacts} onBack={() => setView("main")}
+        t={t} lang={lang} setLang={setLang}
+        onSave={(newContacts) => { setContacts(newContacts); notify(t("联系方式已更新", "Contact details updated")); }}
+      />
+    );
 
   const totalReg = events.reduce((s, e) => s + e.reg, 0);
   const revenue = events.reduce((s, e) => s + e.reg * e.price, 0);
@@ -1129,6 +1205,7 @@ function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttende
       <div className="px-4 mt-5 flex flex-col gap-2.5">
         <button onClick={() => { setTemplateEventId(null); setView("publish"); }} className="w-full flex items-center justify-center gap-2 py-3 rounded-full text-[#FFFDF8] text-[12.5px] font-medium" style={{ background: "#E8432D" }}><Plus size={15} /> {t("发布新活动", "Publish New Event")}</button>
         <button onClick={() => setView("scanner")} className="w-full flex items-center justify-center gap-2 py-3 rounded-full border border-[#3E567D] text-[12.5px] text-[#3E567D]"><QrCode size={15} /> {t("打开现场签到扫码器", "Open On-Site Check-In Scanner")}</button>
+        <button onClick={() => setView("manageContacts")} className="w-full flex items-center justify-center gap-2 py-3 rounded-full border border-[#3E567D] text-[12.5px] text-[#3E567D]"><MessageCircle size={15} /> {t("联系方式管理（微信/WhatsApp 二维码）", "Manage Contact QR Codes (WeChat/WhatsApp)")}</button>
       </div>
       <div className="px-4 mt-5">
         <div className="flex items-center justify-between mb-2">
@@ -1422,6 +1499,66 @@ function EditCoordsScreen({ event, onBack, onSave, t, lang, setLang }) {
   );
 }
 
+/* ---------- 联系方式管理（微信/WhatsApp 等二维码） ---------- */
+function ManageContactsScreen({ contacts, onBack, onSave, t, lang, setLang }) {
+  const [list, setList] = useState(contacts || []);
+  const [uploadingIdx, setUploadingIdx] = useState(null);
+
+  const addContact = () => setList((l) => [...l, { label: "", qr: null }]);
+  const removeContact = (i) => setList((l) => l.filter((_, idx) => idx !== i));
+  const setLabel = (i, label) => setList((l) => l.map((c, idx) => (idx === i ? { ...c, label } : c)));
+
+  const handleQrUpload = (i, file) => {
+    readImageFile(file, async (localUrl) => {
+      setList((l) => l.map((c, idx) => (idx === i ? { ...c, qr: localUrl } : c)));
+      setUploadingIdx(i);
+      const remoteUrl = await uploadImageToDrive(localUrl, file?.name);
+      setUploadingIdx(null);
+      if (remoteUrl) setList((l) => l.map((c, idx) => (idx === i ? { ...c, qr: remoteUrl } : c)));
+    });
+  };
+
+  return (
+    <div className="h-full flex flex-col" style={{ background: "#FFFDF8" }}>
+      <TopBar title={t("联系方式管理", "Manage Contacts")} onBack={onBack} lang={lang} setLang={setLang} />
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5">
+        <p className="text-[11.5px] text-[#6B6456] mb-4">{t("这里添加的二维码会显示在客人的「客服」页面上，方便客人扫码添加你们的微信/WhatsApp 等联系方式。", "QR codes added here will show on the customer-facing Support page, so customers can scan to add your WeChat/WhatsApp/etc.")}</p>
+        <div className="flex flex-col gap-3">
+          {list.map((c, i) => (
+            <div key={i} className="bg-[#F6F1E7] rounded-xl p-3.5 border border-[#EFE7D6]">
+              <div className="flex items-center gap-2 mb-2.5">
+                <input
+                  value={c.label} onChange={(e) => setLabel(i, e.target.value)}
+                  placeholder={t("名称，如 微信 / WhatsApp", "Label, e.g. WeChat / WhatsApp")}
+                  className="flex-1 bg-white rounded-lg px-3 py-2 text-[12.5px] outline-none"
+                />
+                <button onClick={() => removeContact(i)} className="shrink-0 text-[#E8432D] p-1"><Trash2 size={15} /></button>
+              </div>
+              {c.qr && (
+                <div className="w-28 h-28 rounded-lg overflow-hidden bg-white border border-[#E7DFCC] mb-2 flex items-center justify-center">
+                  <img src={c.qr} alt={c.label} className="w-full h-full object-contain" />
+                </div>
+              )}
+              <label className="flex items-center gap-1.5 text-[11.5px] text-[#E8432D] border border-[#E8432D] px-3 py-1.5 rounded-full cursor-pointer w-fit">
+                <ImagePlus size={13} /> {uploadingIdx === i ? t("上传中…", "Uploading…") : c.qr ? t("更换二维码", "Replace QR") : t("上传二维码", "Upload QR")}
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleQrUpload(i, e.target.files?.[0])} />
+              </label>
+            </div>
+          ))}
+          <button onClick={addContact} className="flex items-center justify-center gap-1.5 py-2.5 rounded-full border border-dashed border-[#C9973E] text-[12px] text-[#C69A3E]">
+            <Plus size={14} /> {t("添加一个联系方式", "Add a Contact")}
+          </button>
+        </div>
+      </div>
+      <div className="shrink-0 px-5 py-3 bg-[#FFFDF8] border-t border-[#EFE7D6]">
+        <button onClick={() => { onSave(list.filter((c) => c.label.trim() && c.qr)); onBack(); }} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium" style={{ background: "#E8432D" }}>
+          {t("保存", "Save")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CheckinScannerScreen({ events, onBack, onToggle, t, lang, setLang }) {
   const withPeople = events.filter((e) => (e.attendees || []).length > 0);
   const list = withPeople.length > 0 ? withPeople : events;
@@ -1514,6 +1651,7 @@ export default function App() {
   const [logo, setLogo] = useState(DEFAULT_LOGO);
   const [photos, setPhotos] = useState([]);
   const [activeMembers, setActiveMembers] = useState(0);
+  const [contacts, setContacts] = useState([]);
   const [profile, setProfile] = useState({ name: "", phone: "", email: "" });
   const [lang, setLang] = useState("zh");
   const [loaded, setLoaded] = useState(false);
@@ -1530,6 +1668,7 @@ export default function App() {
       setLogo(shared?.logo || DEFAULT_LOGO);
       setPhotos(shared?.photos || []);
       setActiveMembers(shared?.activeMembers || 0);
+      setContacts(shared?.contacts || []);
       setRegistrations(loadPersonal("registrations", []));
       setNotifications(loadPersonal("notifications", [{ text: "欢迎加入红点时光会员！", time: "系统消息" }]));
       setLang(loadPersonal("lang", "zh"));
@@ -1579,8 +1718,8 @@ export default function App() {
       skipFirstSharedSave.current = false;
       return;
     }
-    saveShared({ events, intro, logo, photos, activeMembers });
-  }, [events, intro, logo, photos, activeMembers, loaded]);
+    saveShared({ events, intro, logo, photos, activeMembers, contacts });
+  }, [events, intro, logo, photos, activeMembers, contacts, loaded]);
   useEffect(() => { if (loaded) savePersonal("registrations", registrations); }, [registrations, loaded]);
   useEffect(() => { if (loaded) savePersonal("notifications", notifications); }, [notifications, loaded]);
   useEffect(() => { if (loaded) savePersonal("lang", lang); }, [lang, loaded]);
@@ -1588,19 +1727,19 @@ export default function App() {
 
   const notify = (text) => { setToast(text); setTimeout(() => setToast(""), 2600); };
 
-  const addRegistration = async (event, info) => {
+  const addRegistration = async (event, info, paymentStatus = "paid") => {
     const qty = Math.max(1, Number(info?.qty) || 1);
-    const sync = await syncRegistrationToSheet(event, info, qty);
+    const sync = await syncRegistrationToSheet(event, info, qty, paymentStatus);
     if (!sync.ok) {
       return { ok: false, message: sync.message || t("名额不足，请调整报名人数", "Not enough spots left — please adjust the party size") };
     }
     setRegistrations((r) => [
-      { id: event.id, title: event.title, date: event.date, location: event.location, price: event.price * qty, qty, name: info?.name, phone: info?.phone, email: info?.email },
+      { id: event.id, title: event.title, date: event.date, location: event.location, price: event.price * qty, qty, name: info?.name, phone: info?.phone, email: info?.email, paymentStatus },
       ...r,
     ]);
     setNotifications((n) => [{ text: t(`您已成功报名「${event.title}」× ${qty}，活动开始前我们会再次提醒您。`, `You're booked for "${event.title}" × ${qty} — we'll remind you before it starts.`), time: event.date }, ...n]);
     setEvents((evs) => evs.map((e) => e.id === event.id
-      ? { ...e, reg: e.reg + qty, attendees: [...(e.attendees || []), { name: info?.name || t("访客", "Guest"), phone: info?.phone || "", email: info?.email || "", qty, checkedIn: false }] }
+      ? { ...e, reg: e.reg + qty, attendees: [...(e.attendees || []), { name: info?.name || t("访客", "Guest"), phone: info?.phone || "", email: info?.email || "", qty, checkedIn: false, paymentStatus }] }
       : e));
     if (info?.name || info?.phone || info?.email) {
       setProfile({ name: info?.name || "", phone: info?.phone || "", email: info?.email || "" });
@@ -1699,13 +1838,13 @@ export default function App() {
     const liveEvent = events.find((e) => e.id === selected.id) || selected;
     body = <DetailScreen event={liveEvent} onBack={() => setSelected(null)} notify={notify} addRegistration={addRegistration} addReview={addReview} logo={logo} profile={profile} t={t} lang={lang} setLang={setLang} />;
   } else if (tab === "home") body = <HomeScreen events={events} onOpen={setSelected} logo={logo} t={t} lang={lang} setLang={setLang} />;
-  else if (tab === "chat") body = <ChatScreen t={t} lang={lang} setLang={setLang} />;
+  else if (tab === "chat") body = <ChatScreen contacts={contacts} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "profile") body = <ProfileScreen notify={notify} registrations={registrations} notifications={notifications} intro={intro} logo={logo} cancelRegistration={cancelRegistration} profile={profile} setProfile={setProfile} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "about") body = <AboutScreen intro={intro} logo={logo} photos={photos} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "admin")
     body = (
       <AdminGate t={t} lang={lang} setLang={setLang}>
-        <AdminScreen events={events} addEvent={addEvent} updateEvent={updateEvent} deleteEvent={deleteEvent} toggleAttendee={toggleAttendee} intro={intro} logo={logo} photos={photos} onSaveIntro={onSaveIntro} notify={notify} setEventCoords={setEventCoords} relocateAllEvents={relocateAllEvents} activeMembers={activeMembers} setActiveMembers={setActiveMembers} resetStats={resetStats} t={t} lang={lang} setLang={setLang} />
+        <AdminScreen events={events} addEvent={addEvent} updateEvent={updateEvent} deleteEvent={deleteEvent} toggleAttendee={toggleAttendee} intro={intro} logo={logo} photos={photos} onSaveIntro={onSaveIntro} notify={notify} setEventCoords={setEventCoords} relocateAllEvents={relocateAllEvents} activeMembers={activeMembers} setActiveMembers={setActiveMembers} resetStats={resetStats} contacts={contacts} setContacts={setContacts} t={t} lang={lang} setLang={setLang} />
       </AdminGate>
     );
 

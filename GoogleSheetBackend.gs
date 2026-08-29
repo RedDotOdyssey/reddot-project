@@ -72,10 +72,13 @@ function handleRegistration(data) {
   if (sheet.getLastRow() === 0) {
     sheet.appendRow([
       "提交时间", "活动名称", "活动日期", "活动地点",
-      "姓名", "电话", "电邮", "报名人数", "金额(S$)", "签到状态", "活动ID",
+      "姓名", "电话", "电邮", "报名人数", "金额(S$)", "签到状态", "活动ID", "支付状态",
     ]);
   } else if (!sheet.getRange(1, 11).getValue()) {
     sheet.getRange(1, 11).setValue("活动ID"); // 兼容旧表格，补上这一列的表头
+  }
+  if (sheet.getLastRow() > 0 && !sheet.getRange(1, 12).getValue()) {
+    sheet.getRange(1, 12).setValue("支付状态"); // 兼容旧表格，补上这一列的表头
   }
 
   var eventTitle = String(data.eventTitle || "").trim();
@@ -104,7 +107,7 @@ function handleRegistration(data) {
   sheet.appendRow([
     new Date(), eventTitle, data.eventDate || "", data.eventLocation || "",
     data.name || "", data.phone || "", data.email || "",
-    qty, data.price || 0, "待签到", eventId,
+    qty, data.price || 0, "待签到", eventId, data.paymentStatus === "pending" ? "待付款" : "已支付",
   ]);
 
   return jsonOutput({ success: true, message: "报名信息已记录" });
