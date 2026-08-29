@@ -475,19 +475,33 @@ function HomeScreen({ events, onOpen, logo, t, lang, setLang }) {
 }
 
 /* ---------- 活动详情 / 报名信息 / 支付 / 电子票 / 分享 ---------- */
-function DetailScreen({ event, onBack, notify, addRegistration, logo, t, lang, setLang }) {
+function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo, t, lang, setLang }) {
   const [stage, setStage] = useState("info"); // info -> regInfo -> pay -> ticket ; share 可从 info/ticket 进入
   const [shareFrom, setShareFrom] = useState("info");
   const [reviewText, setReviewText] = useState("");
-  const [localReviews, setLocalReviews] = useState(event.reviews);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewPhoto, setReviewPhoto] = useState(null);
+  const [reviewPhotoUploading, setReviewPhotoUploading] = useState(false);
   const [regForm, setRegForm] = useState({ name: "", phone: "", email: "", qty: "1" });
   const [regError, setRegError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const handleReviewPhoto = (file) => {
+    readImageFile(file, async (localUrl) => {
+      setReviewPhoto(localUrl);
+      setReviewPhotoUploading(true);
+      const remoteUrl = await uploadImageToDrive(localUrl, file?.name);
+      setReviewPhotoUploading(false);
+      if (remoteUrl) setReviewPhoto(remoteUrl);
+    });
+  };
+
   const submitReview = () => {
     if (!reviewText.trim()) return;
-    setLocalReviews([{ user: t("我", "Me"), rating: 5, text: reviewText, photo: false }, ...localReviews]);
+    addReview(event.id, { user: t("我", "Me"), rating: reviewRating, text: reviewText, photo: reviewPhoto });
     setReviewText("");
+    setReviewRating(5);
+    setReviewPhoto(null);
   };
   const goShare = (from) => { setShareFrom(from); setStage("share"); };
 
@@ -652,22 +666,51 @@ function DetailScreen({ event, onBack, notify, addRegistration, logo, t, lang, s
             <button onClick={() => openFacebook(event)} className="flex items-center gap-1 text-[11px] text-[#6B6456] bg-[#F1EAD9] px-2.5 py-1 rounded-full"><Share2 size={11} /> Facebook</button>
           </div>
           <div className="mt-6">
-            <h3 className="font-semibold text-[14px] text-[#1F2430] mb-2">{t("用户评价", "Reviews")} ({localReviews.length})</h3>
+            <h3 className="font-semibold text-[14px] text-[#1F2430] mb-2">{t("用户评价", "Reviews")} ({(event.reviews || []).length})</h3>
             <div className="flex flex-col gap-2.5">
-              {localReviews.map((r, i) => (
+              {(event.reviews || []).map((r, i) => (
                 <div key={i} className="bg-[#F6F1E7] rounded-xl p-3">
                   <div className="flex justify-between items-center">
                     <span className="text-[12px] font-medium text-[#1F2430]">{r.user}</span>
                     <span className="flex text-[#C69A3E]">{Array.from({ length: r.rating }).map((_, k) => <Star key={k} size={11} fill="#C69A3E" strokeWidth={0} />)}</span>
                   </div>
                   <p className="text-[12px] text-[#4A4438] mt-1">{r.text}</p>
-                  {r.photo && <div className="w-12 h-12 rounded-lg bg-[#E7DFCC] flex items-center justify-center mt-2"><Camera size={16} color="#6B6456" /></div>}
+                  {r.photo && (
+                    typeof r.photo === "string" ? (
+                      <img src={r.photo} alt="review" className="w-20 h-20 rounded-lg object-cover mt-2" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-lg bg-[#E7DFCC] flex items-center justify-center mt-2"><Camera size={16} color="#6B6456" /></div>
+                    )
+                  )}
                 </div>
               ))}
             </div>
-            <div className="flex items-center gap-2 mt-3">
-              <input value={reviewText} onChange={(e) => setReviewText(e.target.value)} placeholder={t("分享你的体验...", "Share your experience...")} className="flex-1 bg-[#F1EAD9] rounded-full px-3.5 py-2 text-[12px] outline-none" />
-              <button onClick={submitReview} className="p-2.5 rounded-full" style={{ background: "#3E567D" }}><Send size={14} color="#F6F1E7" /></button>
+            <div className="mt-3 bg-[#F6F1E7] rounded-xl p-3">
+              <p className="text-[11px] text-[#6B6456] mb-1.5">{t("给这次体验打分", "Rate your experience")}</p>
+              <div className="flex items-center gap-1 mb-2.5">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button key={n} onClick={() => setReviewRating(n)}>
+                    <Star size={19} color="#C69A3E" fill={n <= reviewRating ? "#C69A3E" : "none"} strokeWidth={1.5} />
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <input value={reviewText} onChange={(e) => setReviewText(e.target.value)} placeholder={t("分享你的体验...", "Share your experience...")} className="flex-1 bg-white rounded-full px-3.5 py-2 text-[12px] outline-none" />
+                <label className="p-2.5 rounded-full cursor-pointer" style={{ background: "#FFFDF8", border: "1px solid #E7DFCC" }}>
+                  <ImagePlus size={14} color="#6B6456" />
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => handleReviewPhoto(e.target.files?.[0])} />
+                </label>
+                <button onClick={submitReview} className="p-2.5 rounded-full shrink-0" style={{ background: "#3E567D" }}><Send size={14} color="#F6F1E7" /></button>
+              </div>
+              {(reviewPhoto || reviewPhotoUploading) && (
+                <div className="flex items-center gap-2 mt-2">
+                  {reviewPhoto && <img src={reviewPhoto} alt="preview" className="w-12 h-12 rounded-lg object-cover" />}
+                  <span className="text-[10.5px] text-[#6B6456]">{reviewPhotoUploading ? t("图片上传中…", "Uploading photo…") : t("照片已添加", "Photo attached")}</span>
+                  {reviewPhoto && !reviewPhotoUploading && (
+                    <button onClick={() => setReviewPhoto(null)} className="text-[10.5px] text-[#E8432D] underline">{t("移除", "Remove")}</button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1518,6 +1561,10 @@ export default function App() {
     notify(t("统计数据已清零", "Stats have been reset"));
   };
 
+  const addReview = (eventId, review) => {
+    setEvents((evs) => evs.map((e) => (e.id === eventId ? { ...e, reviews: [review, ...(e.reviews || [])] } : e)));
+  };
+
   const cancelRegistration = (reg, idx) => {
     const ok = window.confirm(t(`确定要取消「${reg.title}」这笔报名吗？`, `Cancel your booking for "${reg.title}"?`));
     if (!ok) return;
@@ -1557,7 +1604,7 @@ export default function App() {
   let body;
   if (selected) {
     const liveEvent = events.find((e) => e.id === selected.id) || selected;
-    body = <DetailScreen event={liveEvent} onBack={() => setSelected(null)} notify={notify} addRegistration={addRegistration} logo={logo} t={t} lang={lang} setLang={setLang} />;
+    body = <DetailScreen event={liveEvent} onBack={() => setSelected(null)} notify={notify} addRegistration={addRegistration} addReview={addReview} logo={logo} t={t} lang={lang} setLang={setLang} />;
   } else if (tab === "home") body = <HomeScreen events={events} onOpen={setSelected} logo={logo} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "chat") body = <ChatScreen t={t} lang={lang} setLang={setLang} />;
   else if (tab === "profile") body = <ProfileScreen notify={notify} registrations={registrations} notifications={notifications} intro={intro} logo={logo} cancelRegistration={cancelRegistration} t={t} lang={lang} setLang={setLang} />;
