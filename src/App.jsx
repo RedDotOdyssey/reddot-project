@@ -1075,7 +1075,7 @@ function ChatScreen({ contacts, t, lang, setLang }) {
 }
 
 /* ---------- 后台分析 ---------- */
-function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttendee, intro, logo, photos, onSaveIntro, notify, setEventCoords, relocateAllEvents, activeMembers, setActiveMembers, resetStats, contacts, setContacts, sharedSyncBlocked, t, lang, setLang }) {
+function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttendee, intro, introEn, logo, photos, onSaveIntro, notify, setEventCoords, relocateAllEvents, activeMembers, setActiveMembers, resetStats, contacts, setContacts, sharedSyncBlocked, t, lang, setLang }) {
   const [view, setView] = useState("main");
   const [coordsEventId, setCoordsEventId] = useState(null);
   const [editEventId, setEditEventId] = useState(null);
@@ -1118,9 +1118,9 @@ function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttende
   if (view === "editIntro")
     return (
       <EditIntroScreen
-        intro={intro} logo={logo} photos={photos} onBack={() => setView("main")}
+        intro={intro} introEn={introEn} logo={logo} photos={photos} onBack={() => setView("main")}
         t={t} lang={lang} setLang={setLang}
-        onSave={(text, newLogo, newPhotos) => { onSaveIntro(text, newLogo, newPhotos); notify(t("公司介绍已更新", "Company profile updated")); }}
+        onSave={(text, textEn, newLogo, newPhotos) => { onSaveIntro(text, textEn, newLogo, newPhotos); notify(t("公司介绍已更新", "Company profile updated")); }}
       />
     );
   if (view === "editCoords") {
@@ -1288,12 +1288,29 @@ function EventFormScreen({ onBack, onSubmit, initial, mode = "create", templateT
     desc: initial?.desc || "",
     image: initial?.image || null,
     coords: initial?.coords || "",
+    titleEn: initial?.titleEn || "",
+    tagEn: initial?.tagEn || "",
+    descEn: initial?.descEn || "",
   });
   const [error, setError] = useState("");
   const [locating, setLocating] = useState(false);
   const [translating, setTranslating] = useState(false);
   const [imgUploading, setImgUploading] = useState(false);
+  const [showEnFields, setShowEnFields] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  const retranslate = async () => {
+    setTranslating(true);
+    const translated = await translateFields({ title: f.title, desc: f.desc, tag: f.tag });
+    setTranslating(false);
+    setF((prev) => ({
+      ...prev,
+      titleEn: translated.title || prev.titleEn,
+      descEn: translated.desc || prev.descEn,
+      tagEn: translated.tag || prev.tagEn,
+    }));
+    setShowEnFields(true);
+  };
 
   const missing = () => {
     const m = [];
@@ -1318,17 +1335,28 @@ function EventFormScreen({ onBack, onSubmit, initial, mode = "create", templateT
       coords = await geocodeAddress(f.location);
       setLocating(false);
     }
-    setTranslating(true);
-    const translated = await translateFields({ title: f.title, desc: f.desc, tag: f.tag });
-    setTranslating(false);
+    // 只翻译还没有内容的字段——如果管理员已经手动填过/改过英文版，不会被自动翻译覆盖掉
+    let titleEn = f.titleEn, descEn = f.descEn, tagEn = f.tagEn;
+    const needTranslate = {};
+    if (!titleEn && f.title) needTranslate.title = f.title;
+    if (!descEn && f.desc) needTranslate.desc = f.desc;
+    if (!tagEn && f.tag) needTranslate.tag = f.tag;
+    if (Object.keys(needTranslate).length > 0) {
+      setTranslating(true);
+      const translated = await translateFields(needTranslate);
+      setTranslating(false);
+      titleEn = titleEn || translated.title || "";
+      descEn = descEn || translated.desc || "";
+      tagEn = tagEn || translated.tag || "";
+    }
     onSubmit({
       ...f,
       date: formatEventDateTime(f.dateOnly, f.timeOnly),
       coords: coords || FALLBACK_COORDS,
       geocodeFailed: !coords,
-      titleEn: translated.title || f.titleEn,
-      descEn: translated.desc || f.descEn,
-      tagEn: translated.tag || f.tagEn,
+      titleEn,
+      descEn,
+      tagEn,
     });
     onBack();
   };
@@ -1404,6 +1432,22 @@ function EventFormScreen({ onBack, onSubmit, initial, mode = "create", templateT
             <input placeholder={t("名额 *", "Capacity *")} type="number" value={f.cap} onChange={set("cap")} className="flex-1 bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none" />
           </div>
           <textarea placeholder={t("活动介绍", "Description")} value={f.desc} onChange={set("desc")} rows={3} className="bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none resize-none" />
+
+          <button onClick={() => setShowEnFields((s) => !s)} className="flex items-center justify-between text-[11.5px] text-[#3E567D] py-1">
+            <span>{t("英文版内容（发布时自动翻译，也可以手动修正）", "English version (auto-translated on publish — you can edit it manually)")}</span>
+            <span>{showEnFields ? "▲" : "▼"}</span>
+          </button>
+          {showEnFields && (
+            <div className="flex flex-col gap-2 bg-[#F6F1E7] rounded-lg p-3">
+              <input placeholder={t("英文标签", "English tag")} value={f.tagEn} onChange={set("tagEn")} className="bg-white rounded-lg px-3 py-2 text-[12px] outline-none" />
+              <input placeholder={t("英文标题", "English title")} value={f.titleEn} onChange={set("titleEn")} className="bg-white rounded-lg px-3 py-2 text-[12px] outline-none" />
+              <textarea placeholder={t("英文介绍", "English description")} value={f.descEn} onChange={set("descEn")} rows={3} className="bg-white rounded-lg px-3 py-2 text-[12px] outline-none resize-none" />
+              <button onClick={retranslate} disabled={translating} className="self-start flex items-center gap-1 text-[11px] text-[#E8432D] disabled:opacity-60">
+                <RotateCcw size={11} /> {translating ? t("翻译中…", "Translating…") : t("重新自动翻译（会覆盖上面的英文内容）", "Re-translate (will overwrite the English text above)")}
+              </button>
+              <p className="text-[10px] text-[#6B6456]">{t("留空的话，发布时会自动翻译；如果这里已经填了内容，发布时不会被自动翻译覆盖。", "Leave blank to auto-translate on publish; if you've already filled this in, it won't be overwritten automatically.")}</p>
+            </div>
+          )}
           {error && <p className="text-[11.5px] text-[#E8432D]">{error}</p>}
         </div>
       </div>
@@ -1417,12 +1461,14 @@ function EventFormScreen({ onBack, onSubmit, initial, mode = "create", templateT
 }
 
 /* ---------- 编辑公司介绍（整屏，支持上传 Logo） ---------- */
-function EditIntroScreen({ intro, logo, photos, onBack, onSave, t, lang, setLang }) {
+function EditIntroScreen({ intro, introEn, logo, photos, onBack, onSave, t, lang, setLang }) {
   const [text, setText] = useState(intro);
+  const [textEn, setTextEn] = useState(introEn || "");
   const [logoPreview, setLogoPreview] = useState(logo);
   const [photoList, setPhotoList] = useState(photos || []);
   const [logoUploading, setLogoUploading] = useState(false);
   const [photoUploading, setPhotoUploading] = useState(false);
+  const [translating, setTranslating] = useState(false);
 
   const handleLogoChange = (file) => {
     readImageFile(file, async (localUrl) => {
@@ -1463,7 +1509,22 @@ function EditIntroScreen({ intro, logo, photos, onBack, onSave, t, lang, setLang
         <p className="text-[10px] text-[#6B6456] mb-4">{t("若点击上传后没有反应，可能是当前预览环境限制了文件选择，可在浏览器中打开完整版重试。", "If nothing happens when you tap upload, this preview environment may be restricting file selection — try opening the full version in a browser.")}</p>
 
         <p className="text-[12px] text-[#6B6456] mb-2">{t("公司介绍文字", "Company Description")}</p>
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} className="w-full bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none resize-none mb-5" />
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} className="w-full bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none resize-none mb-3" />
+
+        <p className="text-[12px] text-[#6B6456] mb-2">{t("英文版介绍（保存时如果留空会自动翻译，也可以手动修正）", "English description (auto-translated on save if left blank — you can edit it manually)")}</p>
+        <textarea value={textEn} onChange={(e) => setTextEn(e.target.value)} rows={6} className="w-full bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none resize-none mb-1" />
+        <button
+          onClick={async () => {
+            setTranslating(true);
+            const translated = await translateFields({ intro: text });
+            setTranslating(false);
+            if (translated.intro) setTextEn(translated.intro);
+          }}
+          disabled={translating}
+          className="flex items-center gap-1 text-[11px] text-[#E8432D] mb-5 disabled:opacity-60"
+        >
+          <RotateCcw size={11} /> {translating ? t("翻译中…", "Translating…") : t("重新自动翻译（会覆盖上面的英文内容）", "Re-translate (will overwrite the English text above)")}
+        </button>
 
         <p className="text-[12px] text-[#6B6456] mb-2">{t('公司照片（会显示在"关于我们"页面）', 'Company Photos (shown on the "About Us" page)')}</p>
         <div className="grid grid-cols-3 gap-2 mb-2">
@@ -1482,7 +1543,7 @@ function EditIntroScreen({ intro, logo, photos, onBack, onSave, t, lang, setLang
         <p className="text-[10px] text-[#6B6456]">{t('可以多次点击"添加照片"上传多张。', 'Tap "Add Photo" repeatedly to upload multiple photos.')}</p>
       </div>
       <div className="shrink-0 px-5 py-3 bg-[#FFFDF8] border-t border-[#EFE7D6]">
-        <button onClick={() => { onSave(text, logoPreview, photoList); onBack(); }} disabled={busy} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium disabled:opacity-60" style={{ background: "#E8432D" }}>
+        <button onClick={() => { onSave(text, textEn, logoPreview, photoList); onBack(); }} disabled={busy} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium disabled:opacity-60" style={{ background: "#E8432D" }}>
           {busy ? t("图片上传中，请稍候…", "Uploading photo, please wait…") : t("保存", "Save")}
         </button>
       </div>
@@ -1902,16 +1963,27 @@ export default function App() {
     }));
   };
 
-  const onSaveIntro = async (text, newLogo, newPhotos) => {
+  const onSaveIntro = async (text, textEn, newLogo, newPhotos) => {
     setIntro(text);
     if (newLogo) setLogo(newLogo);
     if (newPhotos) setPhotos(newPhotos);
-    const translated = await translateFields({ intro: text });
-    if (translated.intro) setIntroEn(translated.intro);
+    if (textEn) {
+      setIntroEn(textEn); // 管理员已经手动填过/改过，直接用，不再自动翻译覆盖
+    } else {
+      const translated = await translateFields({ intro: text });
+      if (translated.intro) setIntroEn(translated.intro);
+    }
   };
 
   let body;
-  if (selected) {
+  if (!loaded) {
+    body = (
+      <div className="h-full flex flex-col items-center justify-center gap-3">
+        <img src={logo} alt="红点时光" className="w-14 h-14 rounded-full object-cover animate-pulse" />
+        <p className="text-[12px] text-[#6B6456]">{t("正在加载…", "Loading…")}</p>
+      </div>
+    );
+  } else if (selected) {
     const liveEvent = events.find((e) => e.id === selected.id) || selected;
     body = <DetailScreen event={liveEvent} onBack={() => setSelected(null)} notify={notify} addRegistration={addRegistration} addReview={addReview} logo={logo} profile={profile} t={t} lang={lang} setLang={setLang} />;
   } else if (tab === "home") body = <HomeScreen events={events} onOpen={setSelected} logo={logo} t={t} lang={lang} setLang={setLang} />;
@@ -1921,7 +1993,7 @@ export default function App() {
   else if (tab === "admin")
     body = (
       <AdminGate t={t} lang={lang} setLang={setLang}>
-        <AdminScreen events={events} addEvent={addEvent} updateEvent={updateEvent} deleteEvent={deleteEvent} toggleAttendee={toggleAttendee} intro={intro} logo={logo} photos={photos} onSaveIntro={onSaveIntro} notify={notify} setEventCoords={setEventCoords} relocateAllEvents={relocateAllEvents} activeMembers={activeMembers} setActiveMembers={setActiveMembers} resetStats={resetStats} contacts={contacts} setContacts={setContacts} sharedSyncBlocked={sharedSyncBlocked} t={t} lang={lang} setLang={setLang} />
+        <AdminScreen events={events} addEvent={addEvent} updateEvent={updateEvent} deleteEvent={deleteEvent} toggleAttendee={toggleAttendee} intro={intro} introEn={introEn} logo={logo} photos={photos} onSaveIntro={onSaveIntro} notify={notify} setEventCoords={setEventCoords} relocateAllEvents={relocateAllEvents} activeMembers={activeMembers} setActiveMembers={setActiveMembers} resetStats={resetStats} contacts={contacts} setContacts={setContacts} sharedSyncBlocked={sharedSyncBlocked} t={t} lang={lang} setLang={setLang} />
       </AdminGate>
     );
 
