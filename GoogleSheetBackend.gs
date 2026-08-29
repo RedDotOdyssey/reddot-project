@@ -37,6 +37,9 @@ function doPost(e) {
     if (data.action === "uploadImage") {
       return uploadImageToDrive(data.base64, data.mimeType, data.filename);
     }
+    if (data.action === "getAppData") {
+      return getAppData();
+    }
 
     // 没有 action 字段的请求，按"报名信息"处理（原有逻辑）
     return handleRegistration(data);

@@ -90,7 +90,14 @@ const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyMKz0
 async function loadShared() {
   if (!GOOGLE_SHEET_WEBHOOK_URL) return null;
   try {
-    const res = await fetch(`${GOOGLE_SHEET_WEBHOOK_URL}?action=getAppData`);
+    // 改用 POST（而不是 GET）来读取数据：Apps Script 处理 GET 请求时会内部跳转一次，
+    // 这个跳转在浏览器里通过 fetch 发起时容易撞上跨域限制而失败；
+    // POST 方式已经在"报名同步"那边验证过是稳定可用的，读取这边改成一致的方式。
+    const res = await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "getAppData" }),
+    });
     const json = await res.json();
     return json.data || null;
   } catch {
