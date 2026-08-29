@@ -1075,7 +1075,7 @@ function ChatScreen({ contacts, t, lang, setLang }) {
 }
 
 /* ---------- 后台分析 ---------- */
-function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttendee, intro, logo, photos, onSaveIntro, notify, setEventCoords, relocateAllEvents, activeMembers, setActiveMembers, resetStats, contacts, setContacts, t, lang, setLang }) {
+function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttendee, intro, logo, photos, onSaveIntro, notify, setEventCoords, relocateAllEvents, activeMembers, setActiveMembers, resetStats, contacts, setContacts, sharedSyncBlocked, t, lang, setLang }) {
   const [view, setView] = useState("main");
   const [coordsEventId, setCoordsEventId] = useState(null);
   const [editEventId, setEditEventId] = useState(null);
@@ -1149,6 +1149,16 @@ function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttende
   return (
     <div className="pb-6">
       <TopBar title={t("管理后台", "Admin")} right={<ShieldCheck size={18} color="#C69A3E" />} lang={lang} setLang={setLang} />
+      {sharedSyncBlocked && (
+        <div className="mx-4 mt-3 px-3.5 py-2.5 rounded-xl" style={{ background: "#FBE4DF" }}>
+          <p className="text-[11.5px] text-[#B23A2A]">
+            {t(
+              "⚠️ 未能连接到数据服务，当前显示的可能不是最新内容。为避免覆盖真实数据，这次打开期间的改动不会自动保存，建议刷新页面后重试，确认恢复正常后再操作。",
+              "⚠️ Couldn't connect to the data service — what you see may be out of date. To avoid overwriting real data, changes made this session won't auto-save. Please refresh and confirm it's connected before making changes."
+            )}
+          </p>
+        </div>
+      )}
       <div className="px-4 pt-4 grid grid-cols-2 gap-3">
         {[
           { label: t("累计报名人数", "Total Bookings"), value: totalReg, icon: Users },
@@ -1698,6 +1708,7 @@ export default function App() {
   const [profile, setProfile] = useState({ name: "", phone: "", email: "" });
   const [lang, setLang] = useState("zh");
   const [loaded, setLoaded] = useState(false);
+  const [sharedSyncBlocked, setSharedSyncBlocked] = useState(false);
   const skipFirstSharedSave = useRef(true);
 
   const t = (zh, en) => (lang === "zh" ? zh : en ?? zh);
@@ -1705,6 +1716,12 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const shared = await loadShared();
+      // 如果配置了同步网址，但这次没能读到任何数据——很可能是网络问题或暂时连不上，
+      // 而不是"这个网站本来就没有数据"。这种情况下绝对不能让后面的自动保存把本地这份
+      // 兜底默认数据回写上去，否则会把 Google Sheet 里已经存好的真实数据覆盖掉。
+      const loadFailed = !!GOOGLE_SHEET_WEBHOOK_URL && shared === null;
+      setSharedSyncBlocked(loadFailed);
+
       const loadedEvents = shared?.events || initialEvents;
       setEvents(loadedEvents);
       setIntro(shared?.intro || DEFAULT_INTRO);
@@ -1718,6 +1735,13 @@ export default function App() {
       setLang(loadPersonal("lang", "zh"));
       setProfile(loadPersonal("profile", { name: "", phone: "", email: "" }));
       setLoaded(true);
+
+      if (loadFailed) {
+        notify(t(
+          "未能连接到数据服务，当前显示的可能不是最新内容。为避免覆盖真实数据，本次不会自动保存改动，请检查网络后刷新页面重试。",
+          "Couldn't connect to the data service — what you're seeing may be out of date. To avoid overwriting real data, changes won't auto-save this session. Please check your connection and refresh."
+        ));
+      }
 
       // 深链接：如果是通过分享出去的活动链接（/events/活动ID）直接打开的，
       // 加载完数据后自动跳到对应的活动详情，而不是停在首页
@@ -1758,12 +1782,13 @@ export default function App() {
   // 刚加载完的第一次不回写（读到什么就是什么，不需要再存一遍），只在之后真正发生改动时才同步
   useEffect(() => {
     if (!loaded) return;
+    if (sharedSyncBlocked) return; // 这次加载数据失败了，绝对不能拿本地这份（可能是兜底默认值）去覆盖服务器上真实的数据
     if (skipFirstSharedSave.current) {
       skipFirstSharedSave.current = false;
       return;
     }
     saveShared({ events, intro, introEn, logo, photos, activeMembers, contacts });
-  }, [events, intro, introEn, logo, photos, activeMembers, contacts, loaded]);
+  }, [events, intro, introEn, logo, photos, activeMembers, contacts, loaded, sharedSyncBlocked]);
   useEffect(() => { if (loaded) savePersonal("registrations", registrations); }, [registrations, loaded]);
   useEffect(() => { if (loaded) savePersonal("notifications", notifications); }, [notifications, loaded]);
   useEffect(() => { if (loaded) savePersonal("lang", lang); }, [lang, loaded]);
@@ -1896,7 +1921,7 @@ export default function App() {
   else if (tab === "admin")
     body = (
       <AdminGate t={t} lang={lang} setLang={setLang}>
-        <AdminScreen events={events} addEvent={addEvent} updateEvent={updateEvent} deleteEvent={deleteEvent} toggleAttendee={toggleAttendee} intro={intro} logo={logo} photos={photos} onSaveIntro={onSaveIntro} notify={notify} setEventCoords={setEventCoords} relocateAllEvents={relocateAllEvents} activeMembers={activeMembers} setActiveMembers={setActiveMembers} resetStats={resetStats} contacts={contacts} setContacts={setContacts} t={t} lang={lang} setLang={setLang} />
+        <AdminScreen events={events} addEvent={addEvent} updateEvent={updateEvent} deleteEvent={deleteEvent} toggleAttendee={toggleAttendee} intro={intro} logo={logo} photos={photos} onSaveIntro={onSaveIntro} notify={notify} setEventCoords={setEventCoords} relocateAllEvents={relocateAllEvents} activeMembers={activeMembers} setActiveMembers={setActiveMembers} resetStats={resetStats} contacts={contacts} setContacts={setContacts} sharedSyncBlocked={sharedSyncBlocked} t={t} lang={lang} setLang={setLang} />
       </AdminGate>
     );
 
