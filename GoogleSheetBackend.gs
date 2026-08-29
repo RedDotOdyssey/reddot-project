@@ -72,19 +72,24 @@ function handleRegistration(data) {
   if (sheet.getLastRow() === 0) {
     sheet.appendRow([
       "提交时间", "活动名称", "活动日期", "活动地点",
-      "姓名", "电话", "电邮", "报名人数", "金额(S$)", "签到状态",
+      "姓名", "电话", "电邮", "报名人数", "金额(S$)", "签到状态", "活动ID",
     ]);
+  } else if (!sheet.getRange(1, 11).getValue()) {
+    sheet.getRange(1, 11).setValue("活动ID"); // 兼容旧表格，补上这一列的表头
   }
 
   var eventTitle = String(data.eventTitle || "").trim();
+  var eventId = String(data.eventId || "");
   var qty = Math.max(1, Number(data.qty) || 1);
   var cap = Number(data.cap) || 0;
 
-  if (cap > 0 && eventTitle) {
+  // 按"活动ID"匹配，而不是按标题文字匹配——避免用"复制模板"创建的、标题相同但
+  // 实际是不同场次的活动，被错误地把报名人数加在一起计算，导致误判"名额已满"
+  if (cap > 0 && eventId) {
     var rows = sheet.getDataRange().getValues();
     var bookedCount = 0;
     for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][1]).trim() === eventTitle) {
+      if (String(rows[i][10]) === eventId) {
         bookedCount += Number(rows[i][7]) || 0;
       }
     }
@@ -99,7 +104,7 @@ function handleRegistration(data) {
   sheet.appendRow([
     new Date(), eventTitle, data.eventDate || "", data.eventLocation || "",
     data.name || "", data.phone || "", data.email || "",
-    qty, data.price || 0, "待签到",
+    qty, data.price || 0, "待签到", eventId,
   ]);
 
   return jsonOutput({ success: true, message: "报名信息已记录" });

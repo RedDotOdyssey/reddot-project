@@ -191,6 +191,7 @@ async function syncRegistrationToSheet(event, info, qty) {
       method: "POST",
       headers: { "Content-Type": "text/plain" }, // 用 text/plain 避免触发浏览器的 CORS 预检请求
       body: JSON.stringify({
+        eventId: event.id,
         eventTitle: event.title,
         eventDate: event.date,
         eventLocation: event.location,
@@ -452,8 +453,12 @@ function HomeScreen({ events, onOpen, logo, t, lang, setLang }) {
         {filtered.map((e) => (
           <button key={e.id} onClick={() => onOpen(e)} className="text-left bg-[#FFFDF8] rounded-2xl p-3.5 shadow-sm border border-[#EFE7D6] flex gap-3 relative overflow-hidden" style={{ opacity: viewMode === "past" ? 0.8 : 1 }}>
             {e.image ? (
-              <div className="w-20 h-20 rounded-xl shrink-0 bg-[#F1EAD9] overflow-hidden flex items-center justify-center relative">
-                <img src={e.image} alt={e.title} className="w-full h-full object-contain" />
+              <div className="w-20 h-20 rounded-xl shrink-0 bg-[#F1EAD9] overflow-hidden relative">
+                <div
+                  className="absolute inset-0"
+                  style={{ backgroundImage: `url(${e.image})`, backgroundSize: "cover", backgroundPosition: "center", filter: "blur(8px) brightness(0.9)", transform: "scale(1.3)" }}
+                />
+                <img src={e.image} alt={e.title} className="absolute inset-0 w-full h-full object-contain" />
                 {viewMode === "past" && (
                   <span className="absolute top-1 left-1 text-[9px] text-white bg-[#3E567D] px-1.5 py-0.5 rounded-full">{t("已结束", "Ended")}</span>
                 )}
@@ -852,8 +857,9 @@ function ProfileScreen({ notify, registrations, notifications, intro, logo, canc
 
 /* ---------- 关于我们 ---------- */
 function AboutScreen({ intro, logo, photos, t, lang, setLang }) {
+  const [viewing, setViewing] = useState(null);
   return (
-    <div className="h-full flex flex-col" style={{ background: "#FFFDF8" }}>
+    <div className="h-full flex flex-col" style={{ background: "#FFFDF8", position: "relative" }}>
       <TopBar title={t("关于我们", "About Us")} lang={lang} setLang={setLang} />
       <div className="flex-1 min-h-0 overflow-y-auto px-6 py-10 flex flex-col items-center text-center">
         <img src={logo} alt="红点时光" className="w-24 h-24 rounded-full object-cover mb-4 shadow" />
@@ -863,13 +869,32 @@ function AboutScreen({ intro, logo, photos, t, lang, setLang }) {
         {photos && photos.length > 0 && (
           <div className="w-full grid grid-cols-2 gap-2.5 mt-7">
             {photos.map((p, i) => (
-              <div key={i} className="rounded-xl overflow-hidden bg-[#F1EAD9]" style={{ aspectRatio: "1/1" }}>
-                <img src={p} alt={`${t("公司照片", "Company photo")} ${i + 1}`} className="w-full h-full object-cover" />
-              </div>
+              <button
+                key={i}
+                onClick={() => setViewing(p)}
+                className="relative rounded-xl overflow-hidden bg-[#F1EAD9]"
+                style={{ aspectRatio: "1/1" }}
+              >
+                <div
+                  className="absolute inset-0"
+                  style={{ backgroundImage: `url(${p})`, backgroundSize: "cover", backgroundPosition: "center", filter: "blur(10px) brightness(0.85)", transform: "scale(1.3)" }}
+                />
+                <img src={p} alt={`${t("公司照片", "Company photo")} ${i + 1}`} className="absolute inset-0 w-full h-full object-contain" />
+              </button>
             ))}
           </div>
         )}
       </div>
+      {viewing && (
+        <div
+          onClick={() => setViewing(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.9)" }}
+          className="flex items-center justify-center p-4"
+        >
+          <img src={viewing} alt="放大预览" className="w-full h-full object-contain" />
+          <button onClick={() => setViewing(null)} className="absolute top-4 right-4 text-white text-[13px] bg-white/15 rounded-full w-9 h-9 flex items-center justify-center">✕</button>
+        </div>
+      )}
     </div>
   );
 }
