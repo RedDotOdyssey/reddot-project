@@ -232,6 +232,24 @@ function syncReviewToSheet(event, review) {
   }).catch(() => {});
 }
 
+// 自动翻译：把一份中文内容（比如活动标题/介绍）交给后台翻译成英文，供切换语言时显示。
+// texts 是一个 {字段名: 文字} 的对象，一次可以传好几个字段一起翻译，减少请求次数。
+// 翻译失败（网络问题等）时返回空对象，调用方应该在拿不到翻译结果时，退回显示原文，不阻断发布/保存流程。
+async function translateFields(texts) {
+  if (!GOOGLE_SHEET_WEBHOOK_URL) return {};
+  try {
+    const res = await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "translate", texts, target: "en" }),
+    });
+    const data = await res.json();
+    return data.success ? data.translations || {} : {};
+  } catch {
+    return {};
+  }
+}
+
 async function geocodeAddress(query) {
   if (!query || !query.trim()) return null;
   try {
@@ -466,7 +484,7 @@ function HomeScreen({ events, onOpen, logo, t, lang, setLang }) {
               </div>
             ) : (
               <div className="w-20 h-20 rounded-xl shrink-0 flex items-center justify-center text-white text-[11px] text-center font-mono px-1 relative" style={{ background: e.color }}>
-                {e.tag}
+                {t(e.tag, e.tagEn || e.tag)}
                 {viewMode === "past" && (
                   <span className="absolute top-1 left-1 text-[9px] text-white bg-[#3E567D] px-1.5 py-0.5 rounded-full">{t("已结束", "Ended")}</span>
                 )}
@@ -476,7 +494,7 @@ function HomeScreen({ events, onOpen, logo, t, lang, setLang }) {
               <div className="flex justify-between items-start gap-2">
                 <div>
                   <span className="text-[9.5px] text-[#E8432D] bg-[#FBE4DF] px-1.5 py-0.5 rounded-full">{typeLabel(t, e.type)}</span>
-                  <h3 className="font-semibold text-[14px] text-[#1F2430] leading-snug mt-1">{e.title}</h3>
+                  <h3 className="font-semibold text-[14px] text-[#1F2430] leading-snug mt-1">{t(e.title, e.titleEn || e.title)}</h3>
                 </div>
                 <BrandBadge logo={logo} size={30} />
               </div>
@@ -539,7 +557,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
       <div className="h-full flex flex-col" style={{ background: "#FFFDF8" }}>
         <TopBar title={t("分享活动", "Share Event")} onBack={() => setStage(shareFrom)} lang={lang} setLang={setLang} />
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-6">
-          <p className="text-[13px] font-semibold text-[#1F2430] mb-1">{event.title}</p>
+          <p className="text-[13px] font-semibold text-[#1F2430] mb-1">{t(event.title, event.titleEn || event.title)}</p>
           <p className="text-[11px] text-[#6B6456] mb-3">{t("点击下方链接框可全选，复制后发送给好友", "Tap the link box below to select all, then copy and send to a friend")}</p>
           <input readOnly value={link} onFocus={(e) => e.target.select()} className="w-full bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12px] outline-none mb-3" />
           <button onClick={() => { navigator.clipboard?.writeText(link).catch(() => {}); notify(t("已复制链接", "Link copied")); }} className="w-full py-2.5 rounded-full text-[#FFFDF8] text-[13px] font-medium mb-4" style={{ background: "#E8432D" }}>{t("复制链接", "Copy Link")}</button>
@@ -590,7 +608,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
       <div className="h-full flex flex-col" style={{ background: "#FFFDF8" }}>
         <TopBar title={t("填写报名信息", "Booking Details")} onBack={() => setStage("info")} lang={lang} setLang={setLang} />
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-6">
-          <p className="text-[13px] font-semibold text-[#1F2430] mb-1">{event.title}</p>
+          <p className="text-[13px] font-semibold text-[#1F2430] mb-1">{t(event.title, event.titleEn || event.title)}</p>
           <p className="text-[11px] text-[#6B6456] mb-4">{t("剩余名额", "Spots left")} {remaining}</p>
           <div className="flex flex-col gap-2.5">
             <input placeholder={t("姓名 *", "Name *")} value={regForm.name} onChange={set("name")} className="bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none" />
@@ -621,7 +639,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
       <div className="h-full flex flex-col" style={{ background: "#FFFDF8" }}>
         <TopBar title={t("确认支付", "Confirm Payment")} onBack={() => setStage("regInfo")} lang={lang} setLang={setLang} />
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-6 flex flex-col items-center">
-          <p className="text-[12px] text-[#6B6456] mb-1">{event.title}（{qty} {t("人", "pax")}）</p>
+          <p className="text-[12px] text-[#6B6456] mb-1">{t(event.title, event.titleEn || event.title)}（{qty} {t("人", "pax")}）</p>
           <p className="text-[28px] font-semibold text-[#1F2430] mb-6">S${(event.price * qty).toFixed(0)}.00</p>
           <div className="w-52 rounded-2xl bg-white border-2 border-[#3E567D] p-3 mb-3">
             <img src={PAYNOW_QR_URI} alt="PayNow QR" className="w-full h-auto" />
@@ -665,7 +683,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
           )}
           <div className="rounded-2xl p-5 text-[#FFFDF8] relative overflow-hidden" style={{ background: "#3E567D" }}>
             <p className="text-[10px] tracking-[3px] text-[#C69A3E]">E-TICKET</p>
-            <h3 className="text-[17px] font-semibold mt-1 mb-3" style={{ fontFamily: "'Noto Serif SC', serif" }}>{event.title}</h3>
+            <h3 className="text-[17px] font-semibold mt-1 mb-3" style={{ fontFamily: "'Noto Serif SC', serif" }}>{t(event.title, event.titleEn || event.title)}</h3>
             <div className="flex justify-between text-[11px] text-[#C9C2B0] mb-1"><span>{t("持票人", "Ticket holder")}</span><span>{regForm.name || t("访客", "Guest")} × {regForm.qty || 1}</span></div>
             <div className="flex justify-between text-[11px] text-[#C9C2B0] mb-1"><span>{t("时间", "Time")}</span><span>{event.date}</span></div>
             <div className="flex justify-between text-[11px] text-[#C9C2B0] mb-1"><span>{t("地点", "Location")}</span><span>{event.location}</span></div>
@@ -705,13 +723,13 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
           </div>
         ) : (
           <div className="h-40 flex items-center justify-center text-white text-[13px] relative" style={{ background: event.color, opacity: isPast ? 0.6 : 1 }}>
-            {typeLabel(t, event.type)} · {event.tag}
+            {typeLabel(t, event.type)} · {t(event.tag, event.tagEn || event.tag)}
             {isPast && <span className="absolute top-3 left-3 text-[10px] text-white bg-[#3E567D] px-2.5 py-1 rounded-full">{t("已结束", "Ended")}</span>}
             <div className="absolute right-4 bottom-[-20px]"><BrandBadge logo={logo} /></div>
           </div>
         )}
         <div className="px-5 pt-7 pb-6">
-          <h2 className="text-[19px] font-semibold text-[#1F2430]" style={{ fontFamily: "'Noto Serif SC', serif" }}>{event.title}</h2>
+          <h2 className="text-[19px] font-semibold text-[#1F2430]" style={{ fontFamily: "'Noto Serif SC', serif" }}>{t(event.title, event.titleEn || event.title)}</h2>
           <div className="flex flex-col gap-1.5 mt-3 text-[13px] text-[#4A4438]">
             <span className="flex items-center gap-2"><Clock size={14} color="#E8432D" /> {event.date}</span>
             <button onClick={() => openMapNavigation(event)} className="flex items-center gap-2 text-left">
@@ -720,7 +738,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
             </button>
             <span className="flex items-center gap-2"><Ticket size={14} color="#E8432D" /> S${event.price} / {t("人", "pax")}</span>
           </div>
-          <p className="text-[13px] text-[#4A4438] leading-relaxed mt-4">{event.desc}</p>
+          <p className="text-[13px] text-[#4A4438] leading-relaxed mt-4">{t(event.desc, event.descEn || event.desc)}</p>
           <button onClick={() => openMapNavigation(event)} className="flex items-center justify-center gap-1.5 w-full mt-4 py-2.5 rounded-full border border-[#3E567D] text-[12px] text-[#3E567D]"><Navigation size={14} /> {t("地图导航", "Directions")}</button>
           <div className="flex gap-2 mt-3">
             <button onClick={() => goShare("info")} className="flex items-center gap-1 text-[11px] text-[#6B6456] bg-[#F1EAD9] px-2.5 py-1 rounded-full"><Share2 size={11} /> {t("微信", "WeChat")}</button>
@@ -790,7 +808,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
 }
 
 /* ---------- 我的（会员中心） ---------- */
-function ProfileScreen({ notify, registrations, notifications, intro, logo, cancelRegistration, profile, setProfile, t, lang, setLang }) {
+function ProfileScreen({ notify, registrations, notifications, intro, introEn, logo, cancelRegistration, profile, setProfile, t, lang, setLang }) {
   const [view, setView] = useState("main");
 
   if (view === "regs") {
@@ -900,7 +918,7 @@ function ProfileScreen({ notify, registrations, notifications, intro, logo, canc
         <h3 className="text-[13px] font-semibold text-[#1F2430] mb-2">{t("公司介绍", "About the Company")}</h3>
         <div className="bg-[#F6F1E7] rounded-xl p-4 border border-[#EFE7D6] flex items-center gap-3">
           <img src={logo} alt="红点时光" className="w-10 h-10 rounded-full shrink-0 object-cover" />
-          <p className="text-[12px] text-[#4A4438] leading-relaxed">{intro}</p>
+          <p className="text-[12px] text-[#4A4438] leading-relaxed">{t(intro, introEn || intro)}</p>
         </div>
       </div>
     </div>
@@ -939,7 +957,7 @@ function EditProfileScreen({ profile, onBack, onSave, t, lang, setLang }) {
 }
 
 
-function AboutScreen({ intro, logo, photos, t, lang, setLang }) {
+function AboutScreen({ intro, introEn, logo, photos, t, lang, setLang }) {
   const [viewing, setViewing] = useState(null);
   return (
     <div className="h-full flex flex-col" style={{ background: "#FFFDF8", position: "relative" }}>
@@ -948,7 +966,7 @@ function AboutScreen({ intro, logo, photos, t, lang, setLang }) {
         <img src={logo} alt="红点时光" className="w-24 h-24 rounded-full object-cover mb-4 shadow" />
         <h2 className="text-[18px] font-semibold text-[#1F2430] mb-1" style={{ fontFamily: "'Noto Serif SC', serif" }}>{t("红点时光探索之旅", "Red Dot Odyssey")}</h2>
         <p className="text-[11px] text-[#C69A3E] tracking-[2px] mb-6">RED DOT ODYSSEY</p>
-        <p className="text-[13px] text-[#4A4438] leading-relaxed">{intro}</p>
+        <p className="text-[13px] text-[#4A4438] leading-relaxed">{t(intro, introEn || intro)}</p>
         {photos && photos.length > 0 && (
           <div className="w-full grid grid-cols-2 gap-2.5 mt-7">
             {photos.map((p, i) => (
@@ -987,15 +1005,27 @@ function ChatScreen({ contacts, t, lang, setLang }) {
   const [msgs, setMsgs] = useState([{ from: "bot", text: t("您好,我是红点小助手,有什么可以帮您?", "Hi, I'm the Red Dot assistant — how can I help you?") }]);
   const [input, setInput] = useState("");
   const [viewing, setViewing] = useState(null);
-  const faqs = [
-    t("如何取消报名？", "How do I cancel a booking?"),
-    t("PayNow 支付失败怎么办？", "What if my PayNow payment fails?"),
+  const faqEntries = [
+    {
+      q: t("如何取消报名？", "How do I cancel a booking?"),
+      a: t(
+        "可以的～打开「我的」→「我的报名记录」，找到对应的活动，点击「取消报名」即可，名额会自动还给其他人。取消后这笔记录会从你的报名列表里移除；如果已经完成支付，请联系我们协助退款。",
+        "Sure — go to \"Me\" → \"My Bookings\", find the booking, and tap \"Cancel Booking\". The spot is automatically released for others, and it's removed from your bookings list. If you've already paid, please contact us to help with a refund."
+      ),
+    },
+    {
+      q: t("PayNow 支付失败怎么办？", "What if my PayNow payment fails?"),
+      a: t("已收到您的问题,人工客服将在 5 分钟内回复您～（演示回复）", "Got your question — a support agent will reply within 5 minutes (demo reply)"),
+    },
   ];
+  const faqs = faqEntries.map((f) => f.q);
   const send = (text) => {
     if (!text.trim()) return;
     setMsgs((m) => [...m, { from: "user", text }]);
     setInput("");
-    setTimeout(() => setMsgs((m) => [...m, { from: "bot", text: t("已收到您的问题,人工客服将在 5 分钟内回复您～（演示回复）", "Got your question — a support agent will reply within 5 minutes (demo reply)") }]), 500);
+    const matched = faqEntries.find((f) => f.q === text);
+    const reply = matched ? matched.a : t("已收到您的问题,人工客服将在 5 分钟内回复您～（演示回复）", "Got your question — a support agent will reply within 5 minutes (demo reply)");
+    setTimeout(() => setMsgs((m) => [...m, { from: "bot", text: reply }]), 500);
   };
   return (
     <div className="flex flex-col h-full" style={{ position: "relative" }}>
@@ -1251,6 +1281,7 @@ function EventFormScreen({ onBack, onSubmit, initial, mode = "create", templateT
   });
   const [error, setError] = useState("");
   const [locating, setLocating] = useState(false);
+  const [translating, setTranslating] = useState(false);
   const [imgUploading, setImgUploading] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
@@ -1277,7 +1308,18 @@ function EventFormScreen({ onBack, onSubmit, initial, mode = "create", templateT
       coords = await geocodeAddress(f.location);
       setLocating(false);
     }
-    onSubmit({ ...f, date: formatEventDateTime(f.dateOnly, f.timeOnly), coords: coords || FALLBACK_COORDS, geocodeFailed: !coords });
+    setTranslating(true);
+    const translated = await translateFields({ title: f.title, desc: f.desc, tag: f.tag });
+    setTranslating(false);
+    onSubmit({
+      ...f,
+      date: formatEventDateTime(f.dateOnly, f.timeOnly),
+      coords: coords || FALLBACK_COORDS,
+      geocodeFailed: !coords,
+      titleEn: translated.title || f.titleEn,
+      descEn: translated.desc || f.descEn,
+      tagEn: translated.tag || f.tagEn,
+    });
     onBack();
   };
 
@@ -1356,8 +1398,8 @@ function EventFormScreen({ onBack, onSubmit, initial, mode = "create", templateT
         </div>
       </div>
       <div className="shrink-0 px-5 py-3 bg-[#FFFDF8] border-t border-[#EFE7D6]">
-        <button onClick={handleSubmit} disabled={locating || imgUploading} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium disabled:opacity-60" style={{ background: "#E8432D" }}>
-          {imgUploading ? t("图片上传中，请稍候…", "Uploading photo, please wait…") : locating ? t("正在定位地点…", "Locating…") : mode === "edit" ? t("保存修改", "Save Changes") : t("发布活动", "Publish Event")}
+        <button onClick={handleSubmit} disabled={locating || imgUploading || translating} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium disabled:opacity-60" style={{ background: "#E8432D" }}>
+          {imgUploading ? t("图片上传中，请稍候…", "Uploading photo, please wait…") : locating ? t("正在定位地点…", "Locating…") : translating ? t("正在生成英文翻译…", "Generating English translation…") : mode === "edit" ? t("保存修改", "Save Changes") : t("发布活动", "Publish Event")}
         </button>
       </div>
     </div>
@@ -1648,6 +1690,7 @@ export default function App() {
   const [notifications, setNotifications] = useState([{ text: "欢迎加入红点时光会员！", time: "系统消息" }]);
   const [events, setEvents] = useState(initialEvents);
   const [intro, setIntro] = useState(DEFAULT_INTRO);
+  const [introEn, setIntroEn] = useState("");
   const [logo, setLogo] = useState(DEFAULT_LOGO);
   const [photos, setPhotos] = useState([]);
   const [activeMembers, setActiveMembers] = useState(0);
@@ -1665,6 +1708,7 @@ export default function App() {
       const loadedEvents = shared?.events || initialEvents;
       setEvents(loadedEvents);
       setIntro(shared?.intro || DEFAULT_INTRO);
+      setIntroEn(shared?.introEn || "");
       setLogo(shared?.logo || DEFAULT_LOGO);
       setPhotos(shared?.photos || []);
       setActiveMembers(shared?.activeMembers || 0);
@@ -1718,8 +1762,8 @@ export default function App() {
       skipFirstSharedSave.current = false;
       return;
     }
-    saveShared({ events, intro, logo, photos, activeMembers, contacts });
-  }, [events, intro, logo, photos, activeMembers, contacts, loaded]);
+    saveShared({ events, intro, introEn, logo, photos, activeMembers, contacts });
+  }, [events, intro, introEn, logo, photos, activeMembers, contacts, loaded]);
   useEffect(() => { if (loaded) savePersonal("registrations", registrations); }, [registrations, loaded]);
   useEffect(() => { if (loaded) savePersonal("notifications", notifications); }, [notifications, loaded]);
   useEffect(() => { if (loaded) savePersonal("lang", lang); }, [lang, loaded]);
@@ -1754,6 +1798,7 @@ export default function App() {
         coords: f.coords || FALLBACK_COORDS, price: Number(f.price) || 0, cap: Number(f.cap) || 0, reg: 0,
         color: f.type === "听见新加坡" ? "#3E567D" : "#3B5245", image: f.image || null,
         desc: f.desc || "", reviews: [], attendees: [],
+        titleEn: f.titleEn || "", descEn: f.descEn || "", tagEn: f.tagEn || "",
       },
       ...evs,
     ]);
@@ -1767,6 +1812,7 @@ export default function App() {
           coords: f.coords || e.coords, price: Number(f.price) || 0, cap: Number(f.cap) || 0,
           color: f.type === "听见新加坡" ? "#3E567D" : "#3B5245",
           image: f.image !== undefined ? f.image : e.image, desc: f.desc || "",
+          titleEn: f.titleEn || e.titleEn || "", descEn: f.descEn || e.descEn || "", tagEn: f.tagEn || e.tagEn || "",
         }
       : e)));
   };
@@ -1831,7 +1877,13 @@ export default function App() {
     }));
   };
 
-  const onSaveIntro = (text, newLogo, newPhotos) => { setIntro(text); if (newLogo) setLogo(newLogo); if (newPhotos) setPhotos(newPhotos); };
+  const onSaveIntro = async (text, newLogo, newPhotos) => {
+    setIntro(text);
+    if (newLogo) setLogo(newLogo);
+    if (newPhotos) setPhotos(newPhotos);
+    const translated = await translateFields({ intro: text });
+    if (translated.intro) setIntroEn(translated.intro);
+  };
 
   let body;
   if (selected) {
@@ -1839,8 +1891,8 @@ export default function App() {
     body = <DetailScreen event={liveEvent} onBack={() => setSelected(null)} notify={notify} addRegistration={addRegistration} addReview={addReview} logo={logo} profile={profile} t={t} lang={lang} setLang={setLang} />;
   } else if (tab === "home") body = <HomeScreen events={events} onOpen={setSelected} logo={logo} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "chat") body = <ChatScreen contacts={contacts} t={t} lang={lang} setLang={setLang} />;
-  else if (tab === "profile") body = <ProfileScreen notify={notify} registrations={registrations} notifications={notifications} intro={intro} logo={logo} cancelRegistration={cancelRegistration} profile={profile} setProfile={setProfile} t={t} lang={lang} setLang={setLang} />;
-  else if (tab === "about") body = <AboutScreen intro={intro} logo={logo} photos={photos} t={t} lang={lang} setLang={setLang} />;
+  else if (tab === "profile") body = <ProfileScreen notify={notify} registrations={registrations} notifications={notifications} intro={intro} introEn={introEn} logo={logo} cancelRegistration={cancelRegistration} profile={profile} setProfile={setProfile} t={t} lang={lang} setLang={setLang} />;
+  else if (tab === "about") body = <AboutScreen intro={intro} introEn={introEn} logo={logo} photos={photos} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "admin")
     body = (
       <AdminGate t={t} lang={lang} setLang={setLang}>

@@ -44,6 +44,9 @@ function doPost(e) {
     if (data.action === "addReview") {
       return handleReview(data);
     }
+    if (data.action === "translate") {
+      return handleTranslate(data);
+    }
 
     // 没有 action 字段的请求，按"报名信息"处理（原有逻辑）
     return handleRegistration(data);
@@ -132,6 +135,22 @@ function handleReview(data) {
   ]);
 
   return jsonOutput({ success: true, message: "评价已记录" });
+}
+
+/* ---------------- 自动翻译（新增，用 Google Apps Script 自带的翻译服务） ---------------- */
+
+function handleTranslate(data) {
+  try {
+    var texts = data.texts || {}; // 支持一次传多段文字一起翻译，减少请求次数
+    var result = {};
+    for (var key in texts) {
+      if (!texts[key]) { result[key] = ""; continue; }
+      result[key] = LanguageApp.translate(texts[key], "", data.target || "en");
+    }
+    return jsonOutput({ success: true, translations: result });
+  } catch (err) {
+    return jsonOutput({ success: false, message: "翻译失败：" + err.toString() });
+  }
 }
 
 /* ---------------- 共享数据同步（新增） ---------------- */
