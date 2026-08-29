@@ -52,7 +52,7 @@ function doPost(e) {
 
 function doGet(e) {
   if (e.parameter.action === "getAppData") {
-    return getAppData();
+    return getAppData(e.parameter.callback);
   }
   return ContentService.createTextOutput(
     "此接口仅接受 POST 请求，用于红点时光探索之旅报名系统。若看到这行字，说明部署已经成功。"
@@ -114,16 +114,28 @@ function getAppDataSheet_() {
   return sheet;
 }
 
-function getAppData() {
+function getAppData(callback) {
   var sheet = getAppDataSheet_();
   var rows = sheet.getDataRange().getValues();
+  var payload = null;
   for (var i = 1; i < rows.length; i++) {
     if (rows[i][0] === "shared") {
       var raw = rows[i][1];
-      return jsonOutput({ success: true, data: raw ? JSON.parse(raw) : null });
+      payload = raw ? JSON.parse(raw) : null;
+      break;
     }
   }
-  return jsonOutput({ success: true, data: null });
+  var json = JSON.stringify({ success: true, data: payload });
+
+  // JSONP：如果请求里带了 callback 参数（前端用 <script> 标签加载时会带），
+  // 就把结果包成一段可执行的 JS 代码返回，绕开"读取跨域内容"被拦截的限制；
+  // 没带 callback 的话（比如被当作 POST 那样直接调用），照常返回普通 JSON。
+  if (callback) {
+    return ContentService
+      .createTextOutput(callback + "(" + json + ")")
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return jsonOutput({ success: true, data: payload });
 }
 
 function saveAppData(payload) {
