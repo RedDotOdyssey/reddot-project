@@ -496,14 +496,14 @@ function HomeScreen({ events, onOpen, logo, t, lang, setLang }) {
 }
 
 /* ---------- 活动详情 / 报名信息 / 支付 / 电子票 / 分享 ---------- */
-function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo, t, lang, setLang }) {
+function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo, profile, t, lang, setLang }) {
   const [stage, setStage] = useState("info"); // info -> regInfo -> pay -> ticket ; share 可从 info/ticket 进入
   const [shareFrom, setShareFrom] = useState("info");
   const [reviewText, setReviewText] = useState("");
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewPhoto, setReviewPhoto] = useState(null);
   const [reviewPhotoUploading, setReviewPhotoUploading] = useState(false);
-  const [regForm, setRegForm] = useState({ name: "", phone: "", email: "", qty: "1" });
+  const [regForm, setRegForm] = useState({ name: profile?.name || "", phone: profile?.phone || "", email: profile?.email || "", qty: "1" });
   const [regError, setRegError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -751,7 +751,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
 }
 
 /* ---------- 我的（会员中心） ---------- */
-function ProfileScreen({ notify, registrations, notifications, intro, logo, cancelRegistration, t, lang, setLang }) {
+function ProfileScreen({ notify, registrations, notifications, intro, logo, cancelRegistration, profile, setProfile, t, lang, setLang }) {
   const [view, setView] = useState("main");
 
   if (view === "regs") {
@@ -810,19 +810,32 @@ function ProfileScreen({ notify, registrations, notifications, intro, logo, canc
     );
   }
 
+  if (view === "editProfile") {
+    return <EditProfileScreen profile={profile} onBack={() => setView("main")} onSave={(p) => { setProfile(p); notify(t("资料已保存", "Profile saved")); }} t={t} lang={lang} setLang={setLang} />;
+  }
+
   return (
     <div className="pb-6">
       <div className="px-5 pt-6 pb-8" style={{ background: "#3E567D" }}>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
-            <div className="w-14 h-14 rounded-full bg-[#E8432D] flex items-center justify-center text-white text-[18px] font-semibold">陈</div>
+            <div className="w-14 h-14 rounded-full bg-[#E8432D] flex items-center justify-center text-white text-[18px] font-semibold">
+              {(profile?.name || t("访客", "Guest")).slice(0, 1)}
+            </div>
             <div>
-              <p className="text-[#F6F1E7] font-semibold text-[15px]">陈美玲</p>
-              <p className="text-[#E7E1CC] text-[11px]">{t("会员编号", "Member ID")} RDTT-00231</p>
+              <p className="text-[#F6F1E7] font-semibold text-[15px]">{profile?.name || t("访客", "Guest")}</p>
+              <p className="text-[#E7E1CC] text-[11px]">
+                {profile?.phone
+                  ? `${t("会员编号", "Member ID")} RDTT-${profile.phone.slice(-4)}`
+                  : t("填写资料后可以自动带入报名信息", "Fill in your details to auto-fill future bookings")}
+              </p>
             </div>
           </div>
           <LangToggle lang={lang} setLang={setLang} />
         </div>
+        <button onClick={() => setView("editProfile")} className="mt-1 text-[11px] text-[#E7E1CC] underline">
+          {profile?.name ? t("编辑我的资料", "Edit my details") : t("填写我的资料", "Fill in my details")}
+        </button>
       </div>
       <div className="px-5 mt-4 flex flex-col gap-2.5">
         <button onClick={() => setView("regs")} className="bg-[#FFFDF8] rounded-xl px-4 py-3.5 flex items-center justify-between border border-[#EFE7D6]">
@@ -855,7 +868,38 @@ function ProfileScreen({ notify, registrations, notifications, intro, logo, canc
   );
 }
 
-/* ---------- 关于我们 ---------- */
+/* ---------- 编辑我的资料 ---------- */
+function EditProfileScreen({ profile, onBack, onSave, t, lang, setLang }) {
+  const [form, setForm] = useState({
+    name: profile?.name || "",
+    phone: profile?.phone || "",
+    email: profile?.email || "",
+  });
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  return (
+    <div className="h-full flex flex-col" style={{ background: "#FFFDF8" }}>
+      <TopBar title={t("我的资料", "My Details")} onBack={onBack} lang={lang} setLang={setLang} />
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5">
+        <p className="text-[11.5px] text-[#6B6456] mb-4">
+          {t("这些信息只会保存在这台设备上，并在你下次报名时自动帮你填好，不用重复输入。", "This is only saved on this device, and will auto-fill your details next time you book — no need to retype.")}
+        </p>
+        <div className="flex flex-col gap-2.5">
+          <input placeholder={t("姓名", "Name")} value={form.name} onChange={set("name")} className="bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none" />
+          <input placeholder={t("联系电话", "Phone")} value={form.phone} onChange={set("phone")} className="bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none" />
+          <input placeholder={t("电邮", "Email")} type="email" value={form.email} onChange={set("email")} className="bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none" />
+        </div>
+      </div>
+      <div className="shrink-0 px-5 py-3 bg-[#FFFDF8] border-t border-[#EFE7D6]">
+        <button onClick={() => { onSave(form); onBack(); }} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium" style={{ background: "#E8432D" }}>
+          {t("保存", "Save")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
 function AboutScreen({ intro, logo, photos, t, lang, setLang }) {
   const [viewing, setViewing] = useState(null);
   return (
@@ -1470,6 +1514,7 @@ export default function App() {
   const [logo, setLogo] = useState(DEFAULT_LOGO);
   const [photos, setPhotos] = useState([]);
   const [activeMembers, setActiveMembers] = useState(0);
+  const [profile, setProfile] = useState({ name: "", phone: "", email: "" });
   const [lang, setLang] = useState("zh");
   const [loaded, setLoaded] = useState(false);
   const skipFirstSharedSave = useRef(true);
@@ -1488,6 +1533,7 @@ export default function App() {
       setRegistrations(loadPersonal("registrations", []));
       setNotifications(loadPersonal("notifications", [{ text: "欢迎加入红点时光会员！", time: "系统消息" }]));
       setLang(loadPersonal("lang", "zh"));
+      setProfile(loadPersonal("profile", { name: "", phone: "", email: "" }));
       setLoaded(true);
 
       // 深链接：如果是通过分享出去的活动链接（/events/活动ID）直接打开的，
@@ -1538,6 +1584,7 @@ export default function App() {
   useEffect(() => { if (loaded) savePersonal("registrations", registrations); }, [registrations, loaded]);
   useEffect(() => { if (loaded) savePersonal("notifications", notifications); }, [notifications, loaded]);
   useEffect(() => { if (loaded) savePersonal("lang", lang); }, [lang, loaded]);
+  useEffect(() => { if (loaded) savePersonal("profile", profile); }, [profile, loaded]);
 
   const notify = (text) => { setToast(text); setTimeout(() => setToast(""), 2600); };
 
@@ -1555,6 +1602,9 @@ export default function App() {
     setEvents((evs) => evs.map((e) => e.id === event.id
       ? { ...e, reg: e.reg + qty, attendees: [...(e.attendees || []), { name: info?.name || t("访客", "Guest"), phone: info?.phone || "", email: info?.email || "", qty, checkedIn: false }] }
       : e));
+    if (info?.name || info?.phone || info?.email) {
+      setProfile({ name: info?.name || "", phone: info?.phone || "", email: info?.email || "" });
+    }
     return { ok: true, message: sync.message || "" };
   };
 
@@ -1647,10 +1697,10 @@ export default function App() {
   let body;
   if (selected) {
     const liveEvent = events.find((e) => e.id === selected.id) || selected;
-    body = <DetailScreen event={liveEvent} onBack={() => setSelected(null)} notify={notify} addRegistration={addRegistration} addReview={addReview} logo={logo} t={t} lang={lang} setLang={setLang} />;
+    body = <DetailScreen event={liveEvent} onBack={() => setSelected(null)} notify={notify} addRegistration={addRegistration} addReview={addReview} logo={logo} profile={profile} t={t} lang={lang} setLang={setLang} />;
   } else if (tab === "home") body = <HomeScreen events={events} onOpen={setSelected} logo={logo} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "chat") body = <ChatScreen t={t} lang={lang} setLang={setLang} />;
-  else if (tab === "profile") body = <ProfileScreen notify={notify} registrations={registrations} notifications={notifications} intro={intro} logo={logo} cancelRegistration={cancelRegistration} t={t} lang={lang} setLang={setLang} />;
+  else if (tab === "profile") body = <ProfileScreen notify={notify} registrations={registrations} notifications={notifications} intro={intro} logo={logo} cancelRegistration={cancelRegistration} profile={profile} setProfile={setProfile} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "about") body = <AboutScreen intro={intro} logo={logo} photos={photos} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "admin")
     body = (
