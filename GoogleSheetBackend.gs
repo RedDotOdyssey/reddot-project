@@ -22,6 +22,7 @@
 
 const APP_DATA_SHEET_NAME = "AppData";
 const REG_SHEET_NAME = "报名记录";
+const REVIEW_SHEET_NAME = "评价";
 const DRIVE_FOLDER_NAME = "红点时光探索之旅_图片";
 
 function doPost(e) {
@@ -39,6 +40,9 @@ function doPost(e) {
     }
     if (data.action === "getAppData") {
       return getAppData();
+    }
+    if (data.action === "addReview") {
+      return handleReview(data);
     }
 
     // 没有 action 字段的请求，按"报名信息"处理（原有逻辑）
@@ -99,6 +103,27 @@ function handleRegistration(data) {
   ]);
 
   return jsonOutput({ success: true, message: "报名信息已记录" });
+}
+
+/* ---------------- 活动评价（新增，单独存一张可读的表） ---------------- */
+
+function handleReview(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(REVIEW_SHEET_NAME) || ss.insertSheet(REVIEW_SHEET_NAME);
+
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["提交时间", "活动名称", "评分", "评价内容", "照片链接"]);
+  }
+
+  sheet.appendRow([
+    new Date(),
+    data.eventTitle || "",
+    data.rating || "",
+    data.text || "",
+    typeof data.photo === "string" ? data.photo : "",
+  ]);
+
+  return jsonOutput({ success: true, message: "评价已记录" });
 }
 
 /* ---------------- 共享数据同步（新增） ---------------- */

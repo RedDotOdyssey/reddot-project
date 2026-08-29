@@ -214,6 +214,22 @@ async function syncRegistrationToSheet(event, info, qty) {
   }
 }
 
+function syncReviewToSheet(event, review) {
+  if (!GOOGLE_SHEET_WEBHOOK_URL) return;
+  // 尽力同步，不阻断本地演示流程，也不需要等待/读取返回结果
+  fetch(GOOGLE_SHEET_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({
+      action: "addReview",
+      eventTitle: event.title,
+      rating: review.rating,
+      text: review.text,
+      photo: review.photo,
+    }),
+  }).catch(() => {});
+}
+
 async function geocodeAddress(query) {
   if (!query || !query.trim()) return null;
   try {
@@ -498,7 +514,9 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
 
   const submitReview = () => {
     if (!reviewText.trim()) return;
-    addReview(event.id, { user: t("我", "Me"), rating: reviewRating, text: reviewText, photo: reviewPhoto });
+    const review = { user: t("我", "Me"), rating: reviewRating, text: reviewText, photo: reviewPhoto };
+    addReview(event.id, review);
+    syncReviewToSheet(event, review);
     setReviewText("");
     setReviewRating(5);
     setReviewPhoto(null);
