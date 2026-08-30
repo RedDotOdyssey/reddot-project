@@ -200,7 +200,7 @@ function openMapSearch(addressText) {
 }
 const FALLBACK_COORDS = "1.2868,103.8545"; // 鱼尾狮公园，中心城区标志性地标，作为定位失败时的保底坐标
 
-async function syncRegistrationToSheet(event, info, qty, paymentStatus) {
+async function syncRegistrationToSheet(event, info, qty, paymentStatus, regId) {
   if (!GOOGLE_SHEET_WEBHOOK_URL) return { ok: true, blocked: false, message: "" }; // 未配置，跳过同步
   try {
     const res = await fetchWithTimeout(GOOGLE_SHEET_WEBHOOK_URL, {
@@ -208,6 +208,7 @@ async function syncRegistrationToSheet(event, info, qty, paymentStatus) {
       headers: { "Content-Type": "text/plain" }, // 用 text/plain 避免触发浏览器的 CORS 预检请求
       body: JSON.stringify({
         eventId: event.id,
+        regId,
         eventTitle: event.title,
         eventDate: event.date,
         eventLocation: event.location,
@@ -263,6 +264,7 @@ function syncCancelToSheet(reg) {
     headers: { "Content-Type": "text/plain" },
     body: JSON.stringify({
       action: "cancelRegistration",
+      regId: reg.regId || "",
       eventId: reg.id,
       name: reg.name,
       phone: reg.phone,
@@ -2000,12 +2002,13 @@ export default function App() {
 
   const addRegistration = async (event, info, paymentStatus = "paid") => {
     const qty = Math.max(1, Number(info?.qty) || 1);
-    const sync = await syncRegistrationToSheet(event, info, qty, paymentStatus);
+    const regId = `${event.id}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const sync = await syncRegistrationToSheet(event, info, qty, paymentStatus, regId);
     if (!sync.ok) {
       return { ok: false, message: sync.message || t("名额不足，请调整报名人数", "Not enough spots left — please adjust the party size") };
     }
     setRegistrations((r) => [
-      { id: event.id, title: event.title, date: event.date, location: event.location, price: event.price * qty, qty, name: info?.name, phone: info?.phone, email: info?.email, paymentStatus },
+      { id: event.id, regId, title: event.title, date: event.date, location: event.location, price: event.price * qty, qty, name: info?.name, phone: info?.phone, email: info?.email, paymentStatus },
       ...r,
     ]);
     setNotifications((n) => [{ text: t(`您已成功报名「${event.title}」× ${qty}，活动开始前我们会再次提醒您。`, `You're booked for "${event.title}" × ${qty} — we'll remind you before it starts.`), time: event.date }, ...n]);

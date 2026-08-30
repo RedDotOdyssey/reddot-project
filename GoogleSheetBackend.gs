@@ -47,6 +47,9 @@ function doPost(e) {
     if (data.action === "translate") {
       return handleTranslate(data);
     }
+    if (data.action === "cancelRegistration") {
+      return handleCancelRegistration(data);
+    }
 
     // 没有 action 字段的请求，按"报名信息"处理（原有逻辑）
     return handleRegistration(data);
@@ -75,13 +78,16 @@ function handleRegistration(data) {
   if (sheet.getLastRow() === 0) {
     sheet.appendRow([
       "提交时间", "活动名称", "活动日期", "活动地点",
-      "姓名", "电话", "电邮", "报名人数", "金额(S$)", "签到状态", "活动ID", "支付状态",
+      "姓名", "电话", "电邮", "报名人数", "金额(S$)", "签到状态", "活动ID", "支付状态", "报名ID",
     ]);
   } else if (!sheet.getRange(1, 11).getValue()) {
     sheet.getRange(1, 11).setValue("活动ID"); // 兼容旧表格，补上这一列的表头
   }
   if (sheet.getLastRow() > 0 && !sheet.getRange(1, 12).getValue()) {
     sheet.getRange(1, 12).setValue("支付状态"); // 兼容旧表格，补上这一列的表头
+  }
+  if (sheet.getLastRow() > 0 && !sheet.getRange(1, 13).getValue()) {
+    sheet.getRange(1, 13).setValue("报名ID"); // 兼容旧表格，补上这一列的表头
   }
 
   var eventTitle = String(data.eventTitle || "").trim();
@@ -90,15 +96,11 @@ function handleRegistration(data) {
   var cap = Number(data.cap) || 0;
 
   // 按"活动ID"匹配，而不是按标题文字匹配——避免用"复制模板"创建的、标题相同但
-  // 实际是不同场次的活动，被错误地把报名人数加在一起计算，导致误判"名额已满"
+  // 实际是不同场次的活动，被错误地把报名人数加在一起计算，导致误判"名额已满"；
+  // 同时要跳过已经标记"已取消"的记录（用统一的 computeRegCounts_ 来算，
+  // 保证这里判断"还有没有名额"，跟页面上显示的"已报名人数"永远是同一份依据）
   if (cap > 0 && eventId) {
-    var rows = sheet.getDataRange().getValues();
-    var bookedCount = 0;
-    for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][10]) === eventId) {
-        bookedCount += Number(rows[i][7]) || 0;
-      }
-    }
+    var bookedCount = computeRegCounts_()[eventId] || 0;
     if (bookedCount + qty > cap) {
       return jsonOutput({
         success: false,
@@ -111,6 +113,7 @@ function handleRegistration(data) {
     new Date(), eventTitle, data.eventDate || "", data.eventLocation || "",
     data.name || "", data.phone || "", data.email || "",
     qty, data.price || 0, "待签到", eventId, data.paymentStatus === "pending" ? "待付款" : "已支付",
+    data.regId || "",
   ]);
 
   return jsonOutput({ success: true, message: "报名信息已记录" });
@@ -177,6 +180,21 @@ function getAppData(callback) {
       break;
     }
   }
+
+  // 关键修复：不要直接信任存进 AppData 里的"已报名人数"（那个数字有可能因为
+  // 多设备/多次保存时机不同而被旧数据覆盖、跟真实情况脱节）。
+  // 每次读取时，都用「报名记录」表里的真实数据重新算一遍，确保显示的数字
+  // 永远和真正判断"还有没有名额"时用的是同一份依据，不会再对不上。
+  if (payload && payload.events && payload.events.length) {
+    var regCounts = computeRegCounts_();
+    for (var j = 0; j < payload.events.length; j++) {
+      var eid = String(payload.events[j].id);
+      if (regCounts.hasOwnProperty(eid)) {
+        payload.events[j].reg = regCounts[eid];
+      }
+    }
+  }
+
   var json = JSON.stringify({ success: true, data: payload });
 
   // JSONP：如果请求里带了 callback 参数（前端用 <script> 标签加载时会带），
@@ -188,6 +206,66 @@ function getAppData(callback) {
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
   return jsonOutput({ success: true, data: payload });
+}
+
+// 统计「报名记录」表里，每个活动ID对应的真实已报名人数总和
+// （这是判断名额够不够时唯一权威的依据，读数据时也用这份，保证两边一致；
+//  已标记为"已取消"的行不计入，避免取消了的名额还一直被占着）
+function computeRegCounts_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(REG_SHEET_NAME);
+  var counts = {};
+  if (!sheet) return counts;
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][9]) === "已取消") continue;
+    var eventId = String(rows[i][10] || "");
+    if (!eventId) continue;
+    var qty = Number(rows[i][7]) || 0;
+    counts[eventId] = (counts[eventId] || 0) + qty;
+  }
+  return counts;
+}
+
+// 客人在 App 里点"取消报名"时调用：找到「报名记录」表里对应的那一行
+// （按 活动ID + 姓名 + 电话 匹配，取最近的一条还没被标记取消的记录），
+// 把「签到状态」改成"已取消"——不删除原始记录，方便保留历史存档，
+// 同时让统计名额时能正确跳过这一笔
+function handleCancelRegistration(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(REG_SHEET_NAME);
+  if (!sheet) return jsonOutput({ success: false, message: "找不到报名记录表" });
+
+  var regId = String(data.regId || "");
+  var eventId = String(data.eventId || "");
+  var name = String(data.name || "");
+  var phone = String(data.phone || "");
+  var rows = sheet.getDataRange().getValues();
+
+  // 优先用「报名ID」精确匹配——每一笔报名的编号都是唯一的，不会认错
+  if (regId) {
+    for (var i = rows.length - 1; i >= 1; i--) {
+      if (String(rows[i][12]) === regId && String(rows[i][9]) !== "已取消") {
+        sheet.getRange(i + 1, 10).setValue("已取消"); // 第10列 = 签到状态
+        return jsonOutput({ success: true, message: "已标记为取消" });
+      }
+    }
+  }
+
+  // 兜底：如果这笔报名是在"报名ID"这个功能上线之前生成的（没有编号可用），
+  // 退回用"活动ID + 姓名 + 电话"匹配最近的一条——不如编号精确，但聊胜于无
+  for (var j = rows.length - 1; j >= 1; j--) {
+    if (
+      String(rows[j][10]) === eventId &&
+      String(rows[j][4]) === name &&
+      String(rows[j][5]) === phone &&
+      String(rows[j][9]) !== "已取消"
+    ) {
+      sheet.getRange(j + 1, 10).setValue("已取消");
+      return jsonOutput({ success: true, message: "已标记为取消（按姓名电话匹配，不如报名编号精确，请人工核对一下是否为正确的那一笔）" });
+    }
+  }
+  return jsonOutput({ success: false, message: "未找到匹配的报名记录" });
 }
 
 function saveAppData(payload) {
