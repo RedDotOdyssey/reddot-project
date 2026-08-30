@@ -254,6 +254,22 @@ function syncReviewToSheet(event, review) {
   }).catch(() => {});
 }
 
+// 把"取消报名"同步到 Google Sheet：把「报名记录」表里对应那一行的签到状态
+// 标记为"已取消"，这样统计名额时才会正确跳过这一笔，不会一直占着名额
+function syncCancelToSheet(reg) {
+  if (!GOOGLE_SHEET_WEBHOOK_URL) return;
+  fetchWithTimeout(GOOGLE_SHEET_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({
+      action: "cancelRegistration",
+      eventId: reg.id,
+      name: reg.name,
+      phone: reg.phone,
+    }),
+  }).catch(() => {});
+}
+
 // 自动翻译：把一份中文内容（比如活动标题/介绍）交给后台翻译成英文，供切换语言时显示。
 // texts 是一个 {字段名: 文字} 的对象，一次可以传好几个字段一起翻译，减少请求次数。
 // 翻译失败（网络问题等）时返回空对象，调用方应该在拿不到翻译结果时，退回显示原文，不阻断发布/保存流程。
@@ -2068,6 +2084,7 @@ export default function App() {
       return { ...e, reg: Math.max(0, e.reg - qty), attendees };
     }));
     setRegistrations((rs) => rs.filter((_, i) => i !== idx));
+    syncCancelToSheet(reg);
     notify(t("已取消报名", "Booking cancelled"));
   };
 
