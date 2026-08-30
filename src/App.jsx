@@ -91,6 +91,18 @@ const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwK-R0
 // Google Apps Script 的返回内容里没办法加上"允许跨域读取"这个标记，
 // 用 fetch() 去读它的内容会被浏览器直接拦下（写入不受影响，只有"读"这个动作受限），
 // JSONP 是绕开这个限制的经典做法——用加载脚本的方式而不是读取内容的方式来拿数据。
+// 统一给所有跟 Google 通信的请求加上"超时机制"：以前是要么成功、要么无限等待，
+// 现在改成"等太久就直接放弃"，不会再出现按钮卡在"正在提交…"却怎么都不动的情况。
+async function fetchWithTimeout(url, options, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function jsonpGetAppData() {
   return new Promise((resolve) => {
     if (!GOOGLE_SHEET_WEBHOOK_URL) { resolve(null); return; }
@@ -128,14 +140,18 @@ async function loadShared() {
   return jsonpGetAppData();
 }
 async function saveShared(payload) {
-  if (!GOOGLE_SHEET_WEBHOOK_URL) return;
+  if (!GOOGLE_SHEET_WEBHOOK_URL) return { ok: true };
   try {
-    await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
+    const res = await fetchWithTimeout(GOOGLE_SHEET_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({ action: "saveAppData", payload }),
     });
-  } catch {}
+    const data = await res.json();
+    return { ok: data.success !== false, message: data.message || "" };
+  } catch (err) {
+    return { ok: false, message: String(err) };
+  }
 }
 
 // 个人数据（我的报名记录/消息通知/语言偏好）：只需要留在这台设备上，
@@ -160,7 +176,7 @@ async function uploadImageToDrive(dataUrl, filename) {
   try {
     const mimeMatch = dataUrl.match(/^data:([^;]+);/);
     const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
-    const res = await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
+    const res = await fetchWithTimeout(GOOGLE_SHEET_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({ action: "uploadImage", base64: dataUrl, mimeType, filename: filename || "image.jpg" }),
@@ -187,7 +203,7 @@ const FALLBACK_COORDS = "1.2868,103.8545"; // 鱼尾狮公园，中心城区标�
 async function syncRegistrationToSheet(event, info, qty, paymentStatus) {
   if (!GOOGLE_SHEET_WEBHOOK_URL) return { ok: true, blocked: false, message: "" }; // 未配置，跳过同步
   try {
-    const res = await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
+    const res = await fetchWithTimeout(GOOGLE_SHEET_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" }, // 用 text/plain 避免触发浏览器的 CORS 预检请求
       body: JSON.stringify({
@@ -211,15 +227,21 @@ async function syncRegistrationToSheet(event, info, qty, paymentStatus) {
     }
     return { ok: true, blocked: false, message: "" };
   } catch (err) {
-    // 网络/部署问题，不阻断本地演示流程，只提示同步未成功
-    return { ok: true, blocked: false, message: "（注意：未能同步到 Google Sheet，可能是网络问题或还没有正式部署，请检查配置）" };
+    // 网络/部署问题，不阻断本地演示流程（客人还是能拿到票），只提示同步未成功
+    const isTimeout = err && err.name === "AbortError";
+    return {
+      ok: true, blocked: false,
+      message: isTimeout
+        ? "（注意：连接 Google 服务器超时，未能同步到 Google Sheet，请稍后在管理后台核对这笔报名）"
+        : "（注意：未能同步到 Google Sheet，可能是网络问题或还没有正式部署，请检查配置）",
+    };
   }
 }
 
 function syncReviewToSheet(event, review) {
   if (!GOOGLE_SHEET_WEBHOOK_URL) return;
   // 尽力同步，不阻断本地演示流程，也不需要等待/读取返回结果
-  fetch(GOOGLE_SHEET_WEBHOOK_URL, {
+  fetchWithTimeout(GOOGLE_SHEET_WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: JSON.stringify({
@@ -238,7 +260,7 @@ function syncReviewToSheet(event, review) {
 async function translateFields(texts) {
   if (!GOOGLE_SHEET_WEBHOOK_URL) return {};
   try {
-    const res = await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
+    const res = await fetchWithTimeout(GOOGLE_SHEET_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({ action: "translate", texts, target: "en" }),
@@ -1941,7 +1963,17 @@ export default function App() {
       skipFirstSharedSave.current = false;
       return;
     }
-    saveShared({ events, intro, introEn, logo, photos, activeMembers, contacts });
+    (async () => {
+      const result = await saveShared({ events, intro, introEn, logo, photos, activeMembers, contacts });
+      if (!result.ok) {
+        // 保存失败了，明确告诉用户，并且暂停后续自动保存——避免又发生"改了半天，其实什么都没真正存上"的情况
+        setSharedSyncBlocked(true);
+        notify(t(
+          "⚠️ 保存失败！刚才的改动可能没有真正存进服务器，请不要关闭页面，检查网络连接后刷新页面重试一次。",
+          "⚠️ Save failed! This change may not have actually been saved to the server. Please don't close this page — check your connection and refresh to retry."
+        ));
+      }
+    })();
   }, [events, intro, introEn, logo, photos, activeMembers, contacts, loaded, sharedSyncBlocked]);
   useEffect(() => { if (loaded) savePersonal("registrations", registrations); }, [registrations, loaded]);
   useEffect(() => { if (loaded) savePersonal("notifications", notifications); }, [notifications, loaded]);
