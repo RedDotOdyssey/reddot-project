@@ -363,6 +363,27 @@ function typeLabel(t, type) {
   if (type === "听见新加坡") return t("听见新加坡", "Hear Singapore");
   return t("全部", "All");
 }
+function hasDiscount(event) {
+  return !!(event.originalPrice && event.originalPrice > event.price);
+}
+function PromoBadge({ event, className }) {
+  if (!event.promoText && !hasDiscount(event)) return null;
+  const pct = hasDiscount(event) ? Math.round((1 - event.price / event.originalPrice) * 100) : null;
+  return (
+    <span className={`text-[9.5px] text-white bg-[#E8432D] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${className || ""}`}>
+      {event.promoText || `-${pct}%`}
+    </span>
+  );
+}
+function PriceTag({ event, size }) {
+  const s = size || "text-[13px]";
+  return (
+    <span className="flex items-center gap-1.5 flex-wrap">
+      {hasDiscount(event) && <span className="text-[10.5px] text-[#8A8378] line-through">S${event.originalPrice}</span>}
+      <span className={`text-[#E8432D] font-semibold ${s}`}>S${event.price}</span>
+    </span>
+  );
+}
 function TopBar({ title, onBack, right, lang, setLang }) {
   return (
     <div className="sticky top-0 z-20 flex items-center justify-between px-4 py-3.5" style={{ background: "#3E567D" }}>
@@ -493,7 +514,10 @@ function HomeScreen({ events, onOpen, logo, t, lang, setLang }) {
             <div className="flex-1 min-w-0">
               <div className="flex justify-between items-start gap-2">
                 <div>
-                  <span className="text-[9.5px] text-[#E8432D] bg-[#FBE4DF] px-1.5 py-0.5 rounded-full">{typeLabel(t, e.type)}</span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[9.5px] text-[#E8432D] bg-[#FBE4DF] px-1.5 py-0.5 rounded-full">{typeLabel(t, e.type)}</span>
+                    <PromoBadge event={e} />
+                  </div>
                   <h3 className="font-semibold text-[14px] text-[#1F2430] leading-snug mt-1">{t(e.title, e.titleEn || e.title)}</h3>
                 </div>
                 <BrandBadge logo={logo} size={30} />
@@ -501,7 +525,7 @@ function HomeScreen({ events, onOpen, logo, t, lang, setLang }) {
               <p className="text-[11px] text-[#6B6456] flex items-center gap-1 mt-1"><Clock size={11} /> {e.date}</p>
               <p className="text-[11px] text-[#6B6456] flex items-center gap-1 mt-0.5"><MapPin size={11} /> {e.location}</p>
               <div className="flex justify-between items-center mt-1.5">
-                <span className="text-[#E8432D] font-semibold text-[13px]">S${e.price}</span>
+                <PriceTag event={e} />
                 <span className="text-[10px] text-[#6B6456]">
                   {viewMode === "past" ? t("共报名", "Total booked") : t("已报名", "Booked")} {e.reg}/{e.cap}
                 </span>
@@ -729,6 +753,9 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
           </div>
         )}
         <div className="px-5 pt-7 pb-6">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <PromoBadge event={event} />
+          </div>
           <h2 className="text-[19px] font-semibold text-[#1F2430]" style={{ fontFamily: "'Noto Serif SC', serif" }}>{t(event.title, event.titleEn || event.title)}</h2>
           <div className="flex flex-col gap-1.5 mt-3 text-[13px] text-[#4A4438]">
             <span className="flex items-center gap-2"><Clock size={14} color="#E8432D" /> {event.date}</span>
@@ -736,7 +763,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
               <MapPin size={14} color="#E8432D" /> {event.location}
               <span className="text-[11px] text-[#E8432D] underline ml-1">{t("导航", "Directions")}</span>
             </button>
-            <span className="flex items-center gap-2"><Ticket size={14} color="#E8432D" /> S${event.price} / {t("人", "pax")}</span>
+            <span className="flex items-center gap-2"><Ticket size={14} color="#E8432D" /> <PriceTag event={event} /> / {t("人", "pax")}</span>
           </div>
           <p className="text-[13px] text-[#4A4438] leading-relaxed mt-4">{t(event.desc, event.descEn || event.desc)}</p>
           <button onClick={() => openMapNavigation(event)} className="flex items-center justify-center gap-1.5 w-full mt-4 py-2.5 rounded-full border border-[#3E567D] text-[12px] text-[#3E567D]"><Navigation size={14} /> {t("地图导航", "Directions")}</button>
@@ -957,8 +984,9 @@ function EditProfileScreen({ profile, onBack, onSave, t, lang, setLang }) {
 }
 
 
-function AboutScreen({ intro, introEn, logo, photos, t, lang, setLang }) {
+function AboutScreen({ intro, introEn, logo, photos, contacts, t, lang, setLang }) {
   const [viewing, setViewing] = useState(null);
+  const aboutContacts = (contacts || []).filter((c) => c.showOn === "about" || c.showOn === "both");
   return (
     <div className="h-full flex flex-col" style={{ background: "#FFFDF8", position: "relative" }}>
       <TopBar title={t("关于我们", "About Us")} lang={lang} setLang={setLang} />
@@ -967,6 +995,21 @@ function AboutScreen({ intro, introEn, logo, photos, t, lang, setLang }) {
         <h2 className="text-[18px] font-semibold text-[#1F2430] mb-1" style={{ fontFamily: "'Noto Serif SC', serif" }}>{t("红点时光探索之旅", "Red Dot Odyssey")}</h2>
         <p className="text-[11px] text-[#C69A3E] tracking-[2px] mb-6">RED DOT ODYSSEY</p>
         <p className="text-[13px] text-[#4A4438] leading-relaxed">{t(intro, introEn || intro)}</p>
+        {aboutContacts.length > 0 && (
+          <div className="w-full mt-7">
+            <p className="text-[11px] text-[#6B6456] mb-2.5">{t("关注我们", "Follow Us")}</p>
+            <div className="flex gap-4 justify-center flex-wrap">
+              {aboutContacts.map((c, i) => (
+                <button key={i} onClick={() => setViewing(c)} className="flex flex-col items-center gap-1.5">
+                  <div className="w-20 h-20 rounded-lg overflow-hidden bg-[#F1EAD9] border border-[#E7DFCC] flex items-center justify-center">
+                    <img src={c.qr} alt={c.label} className="w-full h-full object-contain" />
+                  </div>
+                  <span className="text-[10.5px] text-[#6B6456]">{c.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {photos && photos.length > 0 && (
           <div className="w-full grid grid-cols-2 gap-2.5 mt-7">
             {photos.map((p, i) => (
@@ -990,9 +1033,18 @@ function AboutScreen({ intro, introEn, logo, photos, t, lang, setLang }) {
         <div
           onClick={() => setViewing(null)}
           style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.9)" }}
-          className="flex items-center justify-center p-4"
+          className="flex flex-col items-center justify-center p-4"
         >
-          <img src={viewing} alt="放大预览" className="w-full h-full object-contain" />
+          {typeof viewing === "string" ? (
+            <img src={viewing} alt="放大预览" className="w-full h-full object-contain" />
+          ) : (
+            <>
+              <div className="bg-white rounded-2xl p-4 max-w-[280px] w-full">
+                <img src={viewing.qr} alt={viewing.label} className="w-full h-auto" />
+              </div>
+              <p className="text-white text-[13px] mt-3">{viewing.label}</p>
+            </>
+          )}
           <button onClick={() => setViewing(null)} className="absolute top-4 right-4 text-white text-[13px] bg-white/15 rounded-full w-9 h-9 flex items-center justify-center">✕</button>
         </div>
       )}
@@ -1030,11 +1082,13 @@ function ChatScreen({ contacts, t, lang, setLang }) {
   return (
     <div className="flex flex-col h-full" style={{ position: "relative" }}>
       <TopBar title={t("在线客服", "Live Support")} lang={lang} setLang={setLang} />
-      {contacts && contacts.length > 0 && (
+      {(() => {
+        const chatContacts = (contacts || []).filter((c) => !c.showOn || c.showOn === "chat" || c.showOn === "both");
+        return chatContacts.length > 0 && (
         <div className="px-4 pt-3 pb-1 border-b border-[#EFE7D6]">
           <p className="text-[11px] text-[#6B6456] mb-2">{t("扫码添加我们", "Scan to contact us")}</p>
           <div className="flex gap-2.5 overflow-x-auto pb-1">
-            {contacts.map((c, i) => (
+            {chatContacts.map((c, i) => (
               <button key={i} onClick={() => setViewing(c)} className="shrink-0 flex flex-col items-center gap-1">
                 <div className="w-16 h-16 rounded-lg overflow-hidden bg-[#F6F1E7] border border-[#E7DFCC] flex items-center justify-center">
                   <img src={c.qr} alt={c.label} className="w-full h-full object-contain" />
@@ -1044,7 +1098,8 @@ function ChatScreen({ contacts, t, lang, setLang }) {
             ))}
           </div>
         </div>
-      )}
+        );
+      })()}
       <div className="flex-1 px-4 py-4 flex flex-col gap-2.5 overflow-y-auto">
         {msgs.map((m, i) => (
           <div key={i} className={`max-w-[75%] px-3.5 py-2 rounded-2xl text-[12.5px] ${m.from === "bot" ? "bg-[#F1EAD9] self-start text-[#1F2430]" : "bg-[#3E567D] text-[#F6F1E7] self-end"}`}>{m.text}</div>
@@ -1291,6 +1346,8 @@ function EventFormScreen({ onBack, onSubmit, initial, mode = "create", templateT
     titleEn: initial?.titleEn || "",
     tagEn: initial?.tagEn || "",
     descEn: initial?.descEn || "",
+    originalPrice: initial?.originalPrice != null ? String(initial.originalPrice) : "",
+    promoText: initial?.promoText || "",
   });
   const [error, setError] = useState("");
   const [locating, setLocating] = useState(false);
@@ -1430,6 +1487,22 @@ function EventFormScreen({ onBack, onSubmit, initial, mode = "create", templateT
           <div className="flex gap-2">
             <input placeholder={t("价格 S$ *", "Price S$ *")} type="number" value={f.price} onChange={set("price")} className="flex-1 bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none" />
             <input placeholder={t("名额 *", "Capacity *")} type="number" value={f.cap} onChange={set("cap")} className="flex-1 bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none" />
+          </div>
+          <div>
+            <label className="text-[11px] text-[#6B6456] mb-1 block">{t("促销（可选）", "Promotion (optional)")}</label>
+            <div className="flex gap-2 mb-2">
+              <input
+                placeholder={t("原价 S$（留空则不显示划线价）", "Original price S$ (leave blank to hide)")}
+                type="number" value={f.originalPrice} onChange={set("originalPrice")}
+                className="flex-1 bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none"
+              />
+            </div>
+            <input
+              placeholder={t("促销文字，如 买一送一 / 早鸟优惠", "Promo text, e.g. Buy 1 Get 1 Free / Early Bird")}
+              value={f.promoText} onChange={set("promoText")}
+              className="w-full bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none"
+            />
+            <p className="text-[10px] text-[#6B6456] mt-1">{t("填了「原价」且比「价格」高，会自动算出折扣百分比显示划线价；「促销文字」用来标注买一送一这类没法用折扣百分比表达的活动，两个可以只填一个，也可以都填。", "If \"Original price\" is filled and higher than \"Price\", a discount % badge and struck-through price show automatically. \"Promo text\" is for things like buy-one-get-one that a percentage can't capture — fill in either or both.")}</p>
           </div>
           <textarea placeholder={t("活动介绍", "Description")} value={f.desc} onChange={set("desc")} rows={3} className="bg-[#F1EAD9] rounded-lg px-3 py-2.5 text-[12.5px] outline-none resize-none" />
 
@@ -1614,12 +1687,13 @@ function EditCoordsScreen({ event, onBack, onSave, t, lang, setLang }) {
 
 /* ---------- 联系方式管理（微信/WhatsApp 等二维码） ---------- */
 function ManageContactsScreen({ contacts, onBack, onSave, t, lang, setLang }) {
-  const [list, setList] = useState(contacts || []);
+  const [list, setList] = useState((contacts || []).map((c) => ({ showOn: "chat", ...c })));
   const [uploadingIdx, setUploadingIdx] = useState(null);
 
-  const addContact = () => setList((l) => [...l, { label: "", qr: null }]);
+  const addContact = () => setList((l) => [...l, { label: "", qr: null, showOn: "chat" }]);
   const removeContact = (i) => setList((l) => l.filter((_, idx) => idx !== i));
   const setLabel = (i, label) => setList((l) => l.map((c, idx) => (idx === i ? { ...c, label } : c)));
+  const setShowOn = (i, showOn) => setList((l) => l.map((c, idx) => (idx === i ? { ...c, showOn } : c)));
 
   const handleQrUpload = (i, file) => {
     readImageFile(file, async (localUrl) => {
@@ -1631,18 +1705,24 @@ function ManageContactsScreen({ contacts, onBack, onSave, t, lang, setLang }) {
     });
   };
 
+  const showOnOptions = [
+    { id: "chat", label: t("客服页", "Support page") },
+    { id: "about", label: t("关于我们页", "About Us page") },
+    { id: "both", label: t("两者都显示", "Both") },
+  ];
+
   return (
     <div className="h-full flex flex-col" style={{ background: "#FFFDF8" }}>
       <TopBar title={t("联系方式管理", "Manage Contacts")} onBack={onBack} lang={lang} setLang={setLang} />
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5">
-        <p className="text-[11.5px] text-[#6B6456] mb-4">{t("这里添加的二维码会显示在客人的「客服」页面上，方便客人扫码添加你们的微信/WhatsApp 等联系方式。", "QR codes added here will show on the customer-facing Support page, so customers can scan to add your WeChat/WhatsApp/etc.")}</p>
+        <p className="text-[11.5px] text-[#6B6456] mb-4">{t("这里添加的二维码，可以按需要显示在「客服」页面（方便客人直接联系）或「关于我们」页面（比如公司微信公众号），也可以两个页面都显示。", "QR codes added here can be shown on the Support page (for direct contact), the About Us page (e.g. a WeChat official account), or both.")}</p>
         <div className="flex flex-col gap-3">
           {list.map((c, i) => (
             <div key={i} className="bg-[#F6F1E7] rounded-xl p-3.5 border border-[#EFE7D6]">
               <div className="flex items-center gap-2 mb-2.5">
                 <input
                   value={c.label} onChange={(e) => setLabel(i, e.target.value)}
-                  placeholder={t("名称，如 微信 / WhatsApp", "Label, e.g. WeChat / WhatsApp")}
+                  placeholder={t("名称，如 微信 / WhatsApp / 微信公众号", "Label, e.g. WeChat / WhatsApp / Official Account")}
                   className="flex-1 bg-white rounded-lg px-3 py-2 text-[12.5px] outline-none"
                 />
                 <button onClick={() => removeContact(i)} className="shrink-0 text-[#E8432D] p-1"><Trash2 size={15} /></button>
@@ -1652,10 +1732,23 @@ function ManageContactsScreen({ contacts, onBack, onSave, t, lang, setLang }) {
                   <img src={c.qr} alt={c.label} className="w-full h-full object-contain" />
                 </div>
               )}
-              <label className="flex items-center gap-1.5 text-[11.5px] text-[#E8432D] border border-[#E8432D] px-3 py-1.5 rounded-full cursor-pointer w-fit">
+              <label className="flex items-center gap-1.5 text-[11.5px] text-[#E8432D] border border-[#E8432D] px-3 py-1.5 rounded-full cursor-pointer w-fit mb-2.5">
                 <ImagePlus size={13} /> {uploadingIdx === i ? t("上传中…", "Uploading…") : c.qr ? t("更换二维码", "Replace QR") : t("上传二维码", "Upload QR")}
                 <input type="file" accept="image/*" className="hidden" onChange={(e) => handleQrUpload(i, e.target.files?.[0])} />
               </label>
+              <p className="text-[10.5px] text-[#6B6456] mb-1.5">{t("显示位置", "Show on")}</p>
+              <div className="flex gap-1.5">
+                {showOnOptions.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setShowOn(i, opt.id)}
+                    className="px-2.5 py-1 rounded-full text-[10.5px]"
+                    style={{ background: c.showOn === opt.id ? "#E8432D" : "#FFFDF8", color: c.showOn === opt.id ? "#FFFDF8" : "#6B6456", border: "1px solid #E7DFCC" }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </div>
           ))}
           <button onClick={addContact} className="flex items-center justify-center gap-1.5 py-2.5 rounded-full border border-dashed border-[#C9973E] text-[12px] text-[#C69A3E]">
@@ -1885,6 +1978,7 @@ export default function App() {
         color: f.type === "听见新加坡" ? "#3E567D" : "#3B5245", image: f.image || null,
         desc: f.desc || "", reviews: [], attendees: [],
         titleEn: f.titleEn || "", descEn: f.descEn || "", tagEn: f.tagEn || "",
+        originalPrice: f.originalPrice ? Number(f.originalPrice) : null, promoText: f.promoText || "",
       },
       ...evs,
     ]);
@@ -1899,6 +1993,7 @@ export default function App() {
           color: f.type === "听见新加坡" ? "#3E567D" : "#3B5245",
           image: f.image !== undefined ? f.image : e.image, desc: f.desc || "",
           titleEn: f.titleEn || e.titleEn || "", descEn: f.descEn || e.descEn || "", tagEn: f.tagEn || e.tagEn || "",
+          originalPrice: f.originalPrice ? Number(f.originalPrice) : null, promoText: f.promoText || "",
         }
       : e)));
   };
@@ -1989,7 +2084,7 @@ export default function App() {
   } else if (tab === "home") body = <HomeScreen events={events} onOpen={setSelected} logo={logo} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "chat") body = <ChatScreen contacts={contacts} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "profile") body = <ProfileScreen notify={notify} registrations={registrations} notifications={notifications} intro={intro} introEn={introEn} logo={logo} cancelRegistration={cancelRegistration} profile={profile} setProfile={setProfile} t={t} lang={lang} setLang={setLang} />;
-  else if (tab === "about") body = <AboutScreen intro={intro} introEn={introEn} logo={logo} photos={photos} t={t} lang={lang} setLang={setLang} />;
+  else if (tab === "about") body = <AboutScreen intro={intro} introEn={introEn} logo={logo} photos={photos} contacts={contacts} t={t} lang={lang} setLang={setLang} />;
   else if (tab === "admin")
     body = (
       <AdminGate t={t} lang={lang} setLang={setLang}>
