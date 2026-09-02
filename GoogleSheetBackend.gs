@@ -23,6 +23,7 @@
 const APP_DATA_SHEET_NAME = "AppData";
 const REG_SHEET_NAME = "报名记录";
 const REVIEW_SHEET_NAME = "评价";
+const MEMBER_SHEET_NAME = "会员";
 const DRIVE_FOLDER_NAME = "红点时光探索之旅_图片";
 
 function doPost(e) {
@@ -116,7 +117,53 @@ function handleRegistration(data) {
     data.regId || "",
   ]);
 
+  upsertMember_(data.name || "", data.phone || "", data.email || "", eventTitle);
+
   return jsonOutput({ success: true, message: "报名信息已记录" });
+}
+
+/* ---------------- 会员信息（新增，独立于「报名记录」，每人只保留一行） ---------------- */
+
+function getMemberSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(MEMBER_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(MEMBER_SHEET_NAME);
+    sheet.appendRow(["姓名", "电话", "电邮", "首次注册时间", "最近一次活动", "最近活动时间", "累计报名次数"]);
+  }
+  return sheet;
+}
+
+// 客人第一次报名时，把姓名/电话/电邮记为一条会员信息；同一个人（按电话或电邮识别，
+// 优先用电话——它比电邮更常填、更少打错）之后再报名其他活动，不会重复新增一行，
+// 只更新「最近一次活动」和累计报名次数，避免一个人报名多次活动时会员表里出现好几行重复记录
+function upsertMember_(name, phone, email, eventTitle) {
+  var key = String(phone || "").trim() || String(email || "").trim();
+  if (!key) return; // 姓名和电话/电邮都没填全，没法识别是不是同一个人，跳过
+
+  var sheet = getMemberSheet_();
+  var rows = sheet.getDataRange().getValues();
+  var rowIndex = -1;
+  for (var i = 1; i < rows.length; i++) {
+    var rowPhone = String(rows[i][1] || "").trim();
+    var rowEmail = String(rows[i][2] || "").trim();
+    if ((phone && rowPhone === String(phone).trim()) || (email && rowEmail === String(email).trim())) {
+      rowIndex = i + 1; // 表格行号从1开始
+      break;
+    }
+  }
+
+  if (rowIndex === -1) {
+    // 新会员：第一次报名，记下首次注册时间
+    sheet.appendRow([name || "", phone || "", email || "", new Date(), eventTitle || "", new Date(), 1]);
+  } else {
+    // 老会员：只更新最近一次活动信息和累计次数，首次注册时间不变
+    var count = Number(sheet.getRange(rowIndex, 7).getValue()) || 0;
+    if (name) sheet.getRange(rowIndex, 1).setValue(name); // 姓名可能后来填得更完整，顺手更新一下
+    sheet.getRange(rowIndex, 5).setValue(eventTitle || "");
+    sheet.getRange(rowIndex, 6).setValue(new Date());
+    sheet.getRange(rowIndex, 7).setValue(count + 1);
+  }
 }
 
 /* ---------------- 活动评价（新增，单独存一张可读的表） ---------------- */
