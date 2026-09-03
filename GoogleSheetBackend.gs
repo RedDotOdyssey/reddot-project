@@ -51,6 +51,9 @@ function doPost(e) {
     if (data.action === "cancelRegistration") {
       return handleCancelRegistration(data);
     }
+    if (data.action === "checkin") {
+      return handleCheckin(data);
+    }
 
     // 没有 action 字段的请求，按"报名信息"处理（原有逻辑）
     return handleRegistration(data);
@@ -310,6 +313,30 @@ function handleCancelRegistration(data) {
     ) {
       sheet.getRange(j + 1, 10).setValue("已取消");
       return jsonOutput({ success: true, message: "已标记为取消（按姓名电话匹配，不如报名编号精确，请人工核对一下是否为正确的那一笔）" });
+    }
+  }
+  return jsonOutput({ success: false, message: "未找到匹配的报名记录" });
+}
+
+// 扫码签到 / 名单手动签到时调用：按「报名ID」精确匹配「报名记录」表里对应的那一行，
+// 把「签到状态」改成"已签到"——这样管理员在 Google Sheet 里看到的状态，
+// 才会跟 App 里扫码签到的结果保持一致，不会一直卡在"待签到"
+function handleCheckin(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(REG_SHEET_NAME);
+  if (!sheet) return jsonOutput({ success: false, message: "找不到报名记录表" });
+
+  var regId = String(data.regId || "");
+  if (!regId) return jsonOutput({ success: false, message: "缺少报名编号，无法签到" });
+
+  var rows = sheet.getDataRange().getValues();
+  for (var i = rows.length - 1; i >= 1; i--) {
+    if (String(rows[i][12]) === regId) {
+      // 已经标记过"已取消"的报名不再改成已签到，避免状态混乱
+      if (String(rows[i][9]) !== "已取消") {
+        sheet.getRange(i + 1, 10).setValue("已签到"); // 第10列 = 签到状态
+      }
+      return jsonOutput({ success: true, message: "已标记为已签到" });
     }
   }
   return jsonOutput({ success: false, message: "未找到匹配的报名记录" });

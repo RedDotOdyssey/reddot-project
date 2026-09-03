@@ -279,6 +279,17 @@ function syncCancelToSheet(reg) {
   }).catch(() => {});
 }
 
+// 把"扫码签到"同步到 Google Sheet：把「报名记录」表里对应那一行的签到状态
+// 标记为"已签到"，跟取消报名的同步方式是一样的思路（尽力同步、不等待返回结果）
+function syncCheckinToSheet(regId) {
+  if (!GOOGLE_SHEET_WEBHOOK_URL || !regId) return;
+  fetchWithTimeout(GOOGLE_SHEET_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({ action: "checkin", regId }),
+  }).catch(() => {});
+}
+
 // 自动翻译：把一份中文内容（比如活动标题/介绍）交给后台翻译成英文，供切换语言时显示。
 // texts 是一个 {字段名: 文字} 的对象，一次可以传好几个字段一起翻译，减少请求次数。
 // 翻译失败（网络问题等）时返回空对象，调用方应该在拿不到翻译结果时，退回显示原文，不阻断发布/保存流程。
@@ -2239,10 +2250,22 @@ export default function App() {
   };
 
   const toggleAttendee = (eventId, idx) => {
+    let regIdToSync = null;
+    let willCheckIn = false;
     setEvents((evs) => evs.map((e) => {
       if (e.id !== eventId) return e;
-      return { ...e, attendees: e.attendees.map((a, i) => (i === idx ? { ...a, checkedIn: !a.checkedIn } : a)) };
+      return {
+        ...e, attendees: e.attendees.map((a, i) => {
+          if (i !== idx) return a;
+          willCheckIn = !a.checkedIn;
+          regIdToSync = a.regId;
+          return { ...a, checkedIn: willCheckIn };
+        }),
+      };
     }));
+    // 只有"从未签到变成已签到"才同步到 Google Sheet；手滑点回"待签到"的情况不同步，
+    // 避免把已经签到成功的记录在表格里又改回去（现场一般也不会真的需要撤销签到）
+    if (willCheckIn && regIdToSync) syncCheckinToSheet(regIdToSync);
   };
 
   // 扫码签到：拿摄像头扫到的二维码内容（其实就是这笔报名的 regId）去所有活动里找对应的人，
@@ -2260,6 +2283,7 @@ export default function App() {
         setEvents((evs) => evs.map((ev) => (ev.id !== e.id ? ev : {
           ...ev, attendees: ev.attendees.map((a, i) => (i === idx ? { ...a, checkedIn: true } : a)),
         })));
+        syncCheckinToSheet(regId);
         return { ok: true, name: attendee.name, eventTitle: e.title, message: t(`${attendee.name} 签到成功`, `${attendee.name} checked in`) };
       }
     }
