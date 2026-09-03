@@ -1907,6 +1907,10 @@ function CheckinScannerScreen({ events, onBack, onToggle, onScan, notify, t, lan
   const startScanning = async () => {
     setCameraError("");
     setScanning(true);
+    // 等浏览器真正把预览框渲染出来（不再是隐藏状态）之后再启动摄像头，
+    // 不然会因为这时候预览框还没出现在页面上而直接报错，
+    // 连"要不要用摄像头"的弹窗都还没来得及跳出来
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
       const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID);
       scannerRef.current = scanner;
@@ -1941,11 +1945,10 @@ function CheckinScannerScreen({ events, onBack, onToggle, onScan, notify, t, lan
         </div>
         {active && (
           <>
-            {scanning ? (
-              <div className="rounded-xl overflow-hidden mb-2 bg-black">
-                <div id={SCANNER_ELEMENT_ID} className="w-full" />
-              </div>
-            ) : (
+            <div className={`rounded-xl overflow-hidden mb-2 bg-black ${scanning ? "" : "hidden"}`}>
+              <div id={SCANNER_ELEMENT_ID} className="w-full" />
+            </div>
+            {!scanning && (
               <div className="bg-[#F6F1E7] rounded-xl p-3 mb-2 flex items-center justify-center"><QrCode size={110} color="#3E567D" /></div>
             )}
             <button
