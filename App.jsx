@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
+import { Html5Qrcode } from "html5-qrcode";
 import {
   Search, MapPin, Clock, Ticket, Star, Camera, QrCode, Share2,
   Bell, MessageCircle, User, Home, ShieldCheck, ChevronLeft,
@@ -19,6 +20,12 @@ const PAYNOW_QR_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQQAAAFmCAI
 
 const TYPES = ["全部", "城市探索", "听见新加坡", "红点社群活动"];
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+
+// 生成电子票上真正能扫的二维码图片——码里编码的就是这笔报名的 regId，
+// 现场扫码签到时靠这个码去匹配报名记录（用免费的第三方生码服务，不用额外打包库）
+function ticketQrUrl(regId) {
+  return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data=${encodeURIComponent(regId)}`;
+}
 
 function formatEventDateTime(dateStr, timeStr) {
   if (!dateStr) return "";
@@ -548,12 +555,18 @@ function HomeScreen({ events, onOpen, logo, t, lang, setLang }) {
                 {viewMode === "past" && (
                   <span className="absolute top-1 left-1 text-[9px] text-white bg-[#3E567D] px-1.5 py-0.5 rounded-full">{t("已结束", "Ended")}</span>
                 )}
+                {viewMode !== "past" && e.reg >= e.cap && (
+                  <span className="absolute top-1 left-1 text-[9px] text-white bg-[#E8432D] px-1.5 py-0.5 rounded-full">{t("已满", "Full")}</span>
+                )}
               </div>
             ) : (
               <div className="w-20 h-20 rounded-xl shrink-0 flex items-center justify-center text-white text-[11px] text-center font-mono px-1 relative" style={{ background: e.color }}>
                 {t(e.tag, e.tagEn || e.tag)}
                 {viewMode === "past" && (
                   <span className="absolute top-1 left-1 text-[9px] text-white bg-[#3E567D] px-1.5 py-0.5 rounded-full">{t("已结束", "Ended")}</span>
+                )}
+                {viewMode !== "past" && e.reg >= e.cap && (
+                  <span className="absolute top-1 left-1 text-[9px] text-white bg-[#E8432D] px-1.5 py-0.5 rounded-full">{t("已满", "Full")}</span>
                 )}
               </div>
             )}
@@ -572,9 +585,13 @@ function HomeScreen({ events, onOpen, logo, t, lang, setLang }) {
               <p className="text-[11px] text-[#6B6456] flex items-center gap-1 mt-0.5"><MapPin size={11} /> {e.location}</p>
               <div className="flex justify-between items-center mt-1.5">
                 <PriceTag event={e} />
-                <span className="text-[10px] text-[#6B6456]">
-                  {viewMode === "past" ? t("共报名", "Total booked") : t("已报名", "Booked")} {e.reg}/{e.cap}
-                </span>
+                {viewMode !== "past" && e.reg >= e.cap ? (
+                  <span className="text-[10px] font-medium text-[#E8432D] bg-[#FBE4DF] px-1.5 py-0.5 rounded-full">{t("报名已满", "Fully Booked")}</span>
+                ) : (
+                  <span className="text-[10px] text-[#6B6456]">
+                    {viewMode === "past" ? t("共报名", "Total booked") : t("已报名", "Booked")} {e.reg}/{e.cap}
+                  </span>
+                )}
               </div>
             </div>
           </button>
@@ -596,6 +613,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
   const [regError, setRegError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [ticketPaymentStatus, setTicketPaymentStatus] = useState("paid");
+  const [ticketRegId, setTicketRegId] = useState("");
 
   const handleReviewPhoto = (file) => {
     readImageFile(file, async (localUrl) => {
@@ -671,6 +689,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
         return;
       }
       setTicketPaymentStatus("pending");
+      setTicketRegId(result.regId || "");
       setStage("ticket");
       notify(t("已为你占好名额，请尽快完成支付", "Your spot is reserved — please complete payment soon"));
     };
@@ -725,6 +744,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
                 return;
               }
               setTicketPaymentStatus("paid");
+              setTicketRegId(result.regId || "");
               setStage("ticket");
               notify((t("报名成功！", "Booking confirmed!") + " " + (result.message || "")).trim());
             }}
@@ -759,9 +779,15 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
             <div className="flex justify-between text-[11px] text-[#C9C2B0] mb-1"><span>{t("地点", "Location")}</span><span>{event.location}</span></div>
             <div className="flex justify-between text-[11px] text-[#C9C2B0]"><span>{t("支付状态", "Payment")}</span><span style={{ color: isPending ? "#E8C36B" : "#9FD8B8" }}>{isPending ? t("待付款", "Pending") : t("已支付", "Paid")}</span></div>
             <div className="border-t border-dashed border-white/20 my-3" />
-            <div className="bg-white rounded-xl p-3 flex items-center justify-center"><QrCode size={100} color="#3E567D" /></div>
-            <p className="text-center text-[10px] font-mono text-[#C9C2B0] mt-2">{t("票号", "Ticket #")} RDTT-{event.id}0826-{Math.floor(Math.random() * 9000 + 1000)}</p>
-            <p className="text-center text-[9.5px] text-[#8B95A8] mt-1">{t("这个二维码是您本次报名专属的电子票凭证", "This QR code is your unique e-ticket for this booking")}</p>
+            <div className="bg-white rounded-xl p-3 flex items-center justify-center">
+              {ticketRegId ? (
+                <img src={ticketQrUrl(ticketRegId)} alt="ticket QR" className="w-[100px] h-[100px]" />
+              ) : (
+                <QrCode size={100} color="#3E567D" />
+              )}
+            </div>
+            <p className="text-center text-[10px] font-mono text-[#C9C2B0] mt-2">{t("票号", "Ticket #")} {ticketRegId || `RDTT-${event.id}`}</p>
+            <p className="text-center text-[9.5px] text-[#8B95A8] mt-1">{t("这个二维码是您本次报名专属的电子票凭证，现场出示即可扫码签到", "This QR code is your unique e-ticket for this booking — show it at the venue to check in")}</p>
           </div>
           {isPending && (
             <div className="mt-4 flex flex-col items-center bg-[#F6F1E7] rounded-2xl p-4">
@@ -1176,7 +1202,7 @@ function ChatScreen({ contacts, t, lang, setLang }) {
 }
 
 /* ---------- 后台分析 ---------- */
-function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttendee, intro, introEn, logo, photos, onSaveIntro, notify, setEventCoords, relocateAllEvents, activeMembers, setActiveMembers, resetStats, contacts, setContacts, sharedSyncBlocked, t, lang, setLang }) {
+function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttendee, checkinByRegId, intro, introEn, logo, photos, onSaveIntro, notify, setEventCoords, relocateAllEvents, activeMembers, setActiveMembers, resetStats, contacts, setContacts, sharedSyncBlocked, t, lang, setLang }) {
   const [view, setView] = useState("main");
   const [coordsEventId, setCoordsEventId] = useState(null);
   const [editEventId, setEditEventId] = useState(null);
@@ -1215,7 +1241,7 @@ function AdminScreen({ events, addEvent, updateEvent, deleteEvent, toggleAttende
       />
     );
   }
-  if (view === "scanner") return <CheckinScannerScreen events={events} onBack={() => setView("main")} onToggle={toggleAttendee} t={t} lang={lang} setLang={setLang} />;
+  if (view === "scanner") return <CheckinScannerScreen events={events} onBack={() => setView("main")} onToggle={toggleAttendee} onScan={checkinByRegId} notify={notify} t={t} lang={lang} setLang={setLang} />;
   if (view === "editIntro")
     return (
       <EditIntroScreen
@@ -1811,15 +1837,66 @@ function ManageContactsScreen({ contacts, onBack, onSave, t, lang, setLang }) {
   );
 }
 
-function CheckinScannerScreen({ events, onBack, onToggle, t, lang, setLang }) {
+const SCANNER_ELEMENT_ID = "reddot-qr-reader";
+
+function CheckinScannerScreen({ events, onBack, onToggle, onScan, notify, t, lang, setLang }) {
   const withPeople = events.filter((e) => (e.attendees || []).length > 0);
   const list = withPeople.length > 0 ? withPeople : events;
   const [activeId, setActiveId] = useState(list[0]?.id);
   const active = events.find((e) => e.id === activeId) || list[0];
+  const [scanning, setScanning] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const scannerRef = useRef(null);
+  const busyRef = useRef(false); // 防止同一个码在停止前被连续触发多次
+
+  useEffect(() => {
+    // 离开这个页面（切换活动之外的场景，比如返回）时确保摄像头被关掉，不留后台占用
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(() => {}).finally(() => {
+          scannerRef.current?.clear?.();
+        });
+      }
+    };
+  }, []);
+
+  const stopScanning = async () => {
+    if (scannerRef.current) {
+      try { await scannerRef.current.stop(); } catch (e) { /* 已经停止了，忽略 */ }
+      scannerRef.current.clear?.();
+      scannerRef.current = null;
+    }
+    setScanning(false);
+  };
+
+  const startScanning = async () => {
+    setCameraError("");
+    setScanning(true);
+    try {
+      const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID);
+      scannerRef.current = scanner;
+      await scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        (decodedText) => {
+          if (busyRef.current) return;
+          busyRef.current = true;
+          const result = onScan ? onScan(decodedText) : null;
+          if (result) notify?.(result.message);
+          // 短暂停顿再继续扫，避免同一张票在半秒内被重复计入
+          setTimeout(() => { busyRef.current = false; }, 1200);
+        },
+        () => { /* 每一帧没扫到码都会调用一次这个回调，忽略即可，不是错误 */ }
+      );
+    } catch (err) {
+      setScanning(false);
+      setCameraError(t("无法打开摄像头，请检查浏览器权限，或改用下方名单手动签到", "Couldn't access the camera — check browser permissions, or check people in manually from the list below"));
+    }
+  };
 
   return (
     <div className="h-full flex flex-col" style={{ background: "#FFFDF8" }}>
-      <TopBar title={t("现场签到扫码器", "On-Site Check-In Scanner")} onBack={onBack} lang={lang} setLang={setLang} />
+      <TopBar title={t("现场签到扫码器", "On-Site Check-In Scanner")} onBack={async () => { await stopScanning(); onBack(); }} lang={lang} setLang={setLang} />
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5">
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
           {events.map((e) => (
@@ -1829,8 +1906,22 @@ function CheckinScannerScreen({ events, onBack, onToggle, t, lang, setLang }) {
         </div>
         {active && (
           <>
-            <div className="bg-[#F6F1E7] rounded-xl p-3 mb-2 flex items-center justify-center"><QrCode size={110} color="#3E567D" /></div>
-            <p className="text-[11px] text-[#6B6456] text-center mb-3">{t("对准来宾电子票二维码扫描，或点击下方名单手动签到（演示环境：每位顾客的电子票二维码各不相同，真实扫描后会自动匹配下方对应的名字）", "Scan a guest's e-ticket QR code, or tap a name below to check in manually (demo only: each guest's QR code is unique — a real scan would auto-match the corresponding name below)")}</p>
+            {scanning ? (
+              <div className="rounded-xl overflow-hidden mb-2 bg-black">
+                <div id={SCANNER_ELEMENT_ID} className="w-full" />
+              </div>
+            ) : (
+              <div className="bg-[#F6F1E7] rounded-xl p-3 mb-2 flex items-center justify-center"><QrCode size={110} color="#3E567D" /></div>
+            )}
+            <button
+              onClick={scanning ? stopScanning : startScanning}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-full text-[12.5px] text-[#FFFDF8] mb-2"
+              style={{ background: scanning ? "#E8432D" : "#3E567D" }}
+            >
+              {scanning ? t("停止扫码", "Stop Scanning") : t("打开摄像头扫码", "Start Camera Scan")}
+            </button>
+            {cameraError && <p className="text-[11px] text-[#E8432D] text-center mb-2">{cameraError}</p>}
+            <p className="text-[11px] text-[#6B6456] text-center mb-3">{t("对准来宾电子票二维码扫描，或点击下方名单手动签到（扫到码会自动匹配报名记录，不限于当前选中的活动）", "Point the camera at a guest's e-ticket QR code, or tap a name below to check in manually (a scan auto-matches the booking regardless of which event tab is selected)")}</p>
             <div className="flex flex-col gap-2">
               {(active.attendees || []).map((a, i) => (
                 <button key={i} onClick={() => onToggle(active.id, i)} className="flex items-center justify-between bg-white rounded-xl px-3.5 py-2.5 border border-[#EFE7D6]">
@@ -2019,12 +2110,12 @@ export default function App() {
     ]);
     setNotifications((n) => [{ text: t(`您已成功报名「${event.title}」× ${qty}，活动开始前我们会再次提醒您。`, `You're booked for "${event.title}" × ${qty} — we'll remind you before it starts.`), time: event.date }, ...n]);
     setEvents((evs) => evs.map((e) => e.id === event.id
-      ? { ...e, reg: e.reg + qty, attendees: [...(e.attendees || []), { name: info?.name || t("访客", "Guest"), phone: info?.phone || "", email: info?.email || "", qty, checkedIn: false, paymentStatus }] }
+      ? { ...e, reg: e.reg + qty, attendees: [...(e.attendees || []), { name: info?.name || t("访客", "Guest"), phone: info?.phone || "", email: info?.email || "", qty, checkedIn: false, paymentStatus, regId }] }
       : e));
     if (info?.name || info?.phone || info?.email) {
       setProfile({ name: info?.name || "", phone: info?.phone || "", email: info?.email || "" });
     }
-    return { ok: true, message: sync.message || "" };
+    return { ok: true, message: sync.message || "", regId };
   };
 
   const addEvent = (f) => {
@@ -2116,6 +2207,27 @@ export default function App() {
     }));
   };
 
+  // 扫码签到：拿摄像头扫到的二维码内容（其实就是这笔报名的 regId）去所有活动里找对应的人，
+  // 找到了就标记签到，同时告诉扫码页面结果，好弹出提示（找到了谁 / 已经签过了 / 压根没这笔报名）
+  const checkinByRegId = (scannedText) => {
+    const regId = String(scannedText || "").trim();
+    if (!regId) return { ok: false, message: t("未能识别二维码内容", "Couldn't read this QR code") };
+    for (const e of events) {
+      const idx = (e.attendees || []).findIndex((a) => a.regId === regId);
+      if (idx > -1) {
+        const attendee = e.attendees[idx];
+        if (attendee.checkedIn) {
+          return { ok: false, alreadyIn: true, name: attendee.name, eventTitle: e.title, message: t(`${attendee.name} 已经签到过了`, `${attendee.name} is already checked in`) };
+        }
+        setEvents((evs) => evs.map((ev) => (ev.id !== e.id ? ev : {
+          ...ev, attendees: ev.attendees.map((a, i) => (i === idx ? { ...a, checkedIn: true } : a)),
+        })));
+        return { ok: true, name: attendee.name, eventTitle: e.title, message: t(`${attendee.name} 签到成功`, `${attendee.name} checked in`) };
+      }
+    }
+    return { ok: false, message: t("找不到匹配的报名记录，这个二维码可能不是本活动的电子票", "No matching booking found — this QR code may not be a valid ticket") };
+  };
+
   const onSaveIntro = async (text, textEn, newLogo, newPhotos) => {
     setIntro(text);
     if (newLogo) setLogo(newLogo);
@@ -2146,7 +2258,7 @@ export default function App() {
   else if (tab === "admin")
     body = (
       <AdminGate t={t} lang={lang} setLang={setLang}>
-        <AdminScreen events={events} addEvent={addEvent} updateEvent={updateEvent} deleteEvent={deleteEvent} toggleAttendee={toggleAttendee} intro={intro} introEn={introEn} logo={logo} photos={photos} onSaveIntro={onSaveIntro} notify={notify} setEventCoords={setEventCoords} relocateAllEvents={relocateAllEvents} activeMembers={activeMembers} setActiveMembers={setActiveMembers} resetStats={resetStats} contacts={contacts} setContacts={setContacts} sharedSyncBlocked={sharedSyncBlocked} t={t} lang={lang} setLang={setLang} />
+        <AdminScreen events={events} addEvent={addEvent} updateEvent={updateEvent} deleteEvent={deleteEvent} toggleAttendee={toggleAttendee} checkinByRegId={checkinByRegId} intro={intro} introEn={introEn} logo={logo} photos={photos} onSaveIntro={onSaveIntro} notify={notify} setEventCoords={setEventCoords} relocateAllEvents={relocateAllEvents} activeMembers={activeMembers} setActiveMembers={setActiveMembers} resetStats={resetStats} contacts={contacts} setContacts={setContacts} sharedSyncBlocked={sharedSyncBlocked} t={t} lang={lang} setLang={setLang} />
       </AdminGate>
     );
 
