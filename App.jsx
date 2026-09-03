@@ -712,7 +712,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
         </div>
         <div className="shrink-0 px-5 py-3 bg-[#FFFDF8] border-t border-[#EFE7D6] flex flex-col gap-2">
           <button onClick={goPayNow} disabled={submitting} className="w-full py-3 rounded-full text-[#FFFDF8] font-medium disabled:opacity-60" style={{ background: "#E8432D" }}>
-            {t("立即支付", "Pay Now")} · S${(event.price * Math.max(1, Number(regForm.qty) || 1)).toFixed(0)}
+            {t("立即支付", "Pay Now")} · S${(event.price * Math.max(1, Number(regForm.qty) || 1)).toFixed(2)}
           </button>
           <button onClick={payLater} disabled={submitting} className="w-full py-3 rounded-full font-medium disabled:opacity-60 border border-[#3E567D] text-[#3E567D]">
             {submitting ? t("正在提交…", "Submitting…") : t("先占位，稍后支付", "Reserve Now, Pay Later")}
@@ -729,7 +729,7 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
         <TopBar title={t("确认支付", "Confirm Payment")} onBack={() => setStage("regInfo")} lang={lang} setLang={setLang} />
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-6 flex flex-col items-center">
           <p className="text-[12px] text-[#6B6456] mb-1">{t(event.title, event.titleEn || event.title)}（{qty} {t("人", "pax")}）</p>
-          <p className="text-[28px] font-semibold text-[#1F2430] mb-6">S${(event.price * qty).toFixed(0)}.00</p>
+          <p className="text-[28px] font-semibold text-[#1F2430] mb-6">S${(event.price * qty).toFixed(2)}</p>
           <div className="w-52 rounded-2xl bg-white border-2 border-[#3E567D] p-3 mb-3">
             <img src={PAYNOW_QR_URI} alt="PayNow QR" className="w-full h-auto" />
           </div>
@@ -909,6 +909,31 @@ function DetailScreen({ event, onBack, notify, addRegistration, addReview, logo,
 /* ---------- 我的（会员中心） ---------- */
 function ProfileScreen({ notify, registrations, notifications, intro, introEn, logo, cancelRegistration, profile, setProfile, t, lang, setLang }) {
   const [view, setView] = useState("main");
+  const [selectedReg, setSelectedReg] = useState(null);
+
+  if (view === "ticket" && selectedReg) {
+    const r = selectedReg;
+    return (
+      <div className="h-full flex flex-col" style={{ background: "#3E567D" }}>
+        <TopBar title={t("我的电子票", "My E-Ticket")} onBack={() => setView("regs")} lang={lang} setLang={setLang} />
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-6 flex flex-col items-center">
+          <div className="w-full max-w-xs bg-[#3E567D] border border-white/15 rounded-2xl p-5 text-[#F6F1E7]">
+            <p className="text-[15px] font-semibold mb-1">{r.title}</p>
+            <p className="text-[11.5px] text-[#C9C2B0] flex items-center gap-1 mt-2"><Clock size={12} /> {r.date}</p>
+            <p className="text-[11.5px] text-[#C9C2B0] mt-1 flex items-center gap-1"><MapPin size={12} /> {r.location}</p>
+            {r.name && <p className="text-[11.5px] text-[#C9C2B0] mt-1">{t("联系人", "Contact")}：{r.name} · {t("人数", "Pax")} {r.qty || 1}</p>}
+            <div className="flex justify-between text-[11px] text-[#C9C2B0] mt-3"><span>{t("支付状态", "Payment")}</span><span style={{ color: r.paymentStatus === "pending" ? "#E8C36B" : "#9FD8B8" }}>{r.paymentStatus === "pending" ? t("待付款", "Pending") : t("已支付", "Paid")}</span></div>
+            <div className="border-t border-dashed border-white/20 my-3" />
+            <div className="bg-white rounded-xl p-3 flex items-center justify-center">
+              {r.regId ? <img src={ticketQrUrl(r.regId)} alt="ticket QR" className="w-[100px] h-[100px]" /> : <QrCode size={100} color="#3E567D" />}
+            </div>
+            <p className="text-center text-[10px] font-mono text-[#C9C2B0] mt-2">{t("票号", "Ticket #")} {r.regId || `RDTT-${r.id}`}</p>
+            <p className="text-center text-[9.5px] text-[#8B95A8] mt-1">{t("这个二维码是您本次报名专属的电子票凭证，现场出示即可扫码签到", "This QR code is your unique e-ticket for this booking — show it at the venue to check in")}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (view === "regs") {
     return (
@@ -928,14 +953,24 @@ function ProfileScreen({ notify, registrations, notifications, intro, introEn, l
                   <p className="text-[11px] text-[#6B6456] mt-1 flex items-center gap-1"><Clock size={11} /> {r.date}</p>
                   <p className="text-[11px] text-[#6B6456] mt-0.5 flex items-center gap-1"><MapPin size={11} /> {r.location}</p>
                   {r.name && <p className="text-[10.5px] text-[#6B6456] mt-1">{t("联系人", "Contact")}：{r.name} · {r.phone} · {t("人数", "Pax")} {r.qty || 1}</p>}
-                  {r.id != null && (
-                    <button
-                      onClick={() => cancelRegistration(r, i)}
-                      className="mt-2 text-[11px] text-[#E8432D] border border-[#E8432D] px-3 py-1 rounded-full"
-                    >
-                      {t("取消报名", "Cancel Booking")}
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2 mt-2">
+                    {r.id != null && (
+                      <button
+                        onClick={() => { setSelectedReg(r); setView("ticket"); }}
+                        className="text-[11px] text-[#3E567D] border border-[#3E567D] px-3 py-1 rounded-full flex items-center gap-1"
+                      >
+                        <QrCode size={12} /> {t("查看电子票", "View E-Ticket")}
+                      </button>
+                    )}
+                    {r.id != null && (
+                      <button
+                        onClick={() => cancelRegistration(r, i)}
+                        className="text-[11px] text-[#E8432D] border border-[#E8432D] px-3 py-1 rounded-full"
+                      >
+                        {t("取消报名", "Cancel Booking")}
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
